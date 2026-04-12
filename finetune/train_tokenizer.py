@@ -1,9 +1,9 @@
 import os
 import sys
+import glob
 import json
 import time
 from time import gmtime, strftime
-import argparse
 import datetime
 import torch.distributed as dist
 import torch
@@ -12,7 +12,10 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-import comet_ml
+try:
+    import comet_ml
+except ImportError:
+    comet_ml = None
 
 # Ensure project root is in path
 sys.path.append("../")
@@ -21,7 +24,7 @@ from dataset import QlibDataset
 from model.kronos import KronosTokenizer
 # Import shared utilities
 from utils.training_utils import (
-    setup_ddp,
+    setup_training,
     cleanup_ddp,
     set_seed,
     get_model_size,
@@ -29,71 +32,130 @@ from utils.training_utils import (
 )
 
 
-def create_dataloaders(config: dict, rank: int, world_size: int):
+def create_dataloaders(config: dict, rank: int, world_size: int, is_ddp: bool):
     """
-    Creates and returns distributed dataloaders for training and validation.
+    Creates and returns dataloaders for training and validation.
+
+    In DDP mode, uses DistributedSampler. In single-device mode, uses regular
+    DataLoader with shuffle.
 
     Args:
         config (dict): A dictionary of configuration parameters.
         rank (int): The global rank of the current process.
         world_size (int): The total number of processes.
+        is_ddp (bool): Whether running in distributed data parallel mode.
 
     Returns:
         tuple: A tuple containing (train_loader, val_loader, train_dataset, valid_dataset).
     """
-    print(f"[Rank {rank}] Creating distributed dataloaders...")
+    mode_str = "distributed" if is_ddp else "single-device"
+    print(f"[Rank {rank}] Creating {mode_str} dataloaders...")
     train_dataset = QlibDataset('train')
     valid_dataset = QlibDataset('val')
     print(f"[Rank {rank}] Train dataset size: {len(train_dataset)}, Validation dataset size: {len(valid_dataset)}")
 
-    train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
-    val_sampler = DistributedSampler(valid_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+    if is_ddp:
+        train_sampler = DistributedSampler(train_dataset, num_replicas=world_size, rank=rank, shuffle=True)
+        val_sampler = DistributedSampler(valid_dataset, num_replicas=world_size, rank=rank, shuffle=False)
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config['batch_size'],
+            sampler=train_sampler,
+            shuffle=False,  # Shuffle is handled by the sampler
+            num_workers=config.get('num_workers', 2),
+            pin_memory=True,
+            drop_last=True
+        )
+        val_loader = DataLoader(
+            valid_dataset,
+            batch_size=config['batch_size'],
+            sampler=val_sampler,
+            shuffle=False,
+            num_workers=config.get('num_workers', 2),
+            pin_memory=True,
+            drop_last=False
+        )
+    else:
+        train_loader = DataLoader(
+            train_dataset,
+            batch_size=config['batch_size'],
+            shuffle=True,
+            num_workers=config.get('num_workers', 2),
+            pin_memory=True,
+            drop_last=True
+        )
+        val_loader = DataLoader(
+            valid_dataset,
+            batch_size=config['batch_size'],
+            shuffle=False,
+            num_workers=config.get('num_workers', 2),
+            pin_memory=True,
+            drop_last=False
+        )
 
-    train_loader = DataLoader(
-        train_dataset,
-        batch_size=config['batch_size'],
-        sampler=train_sampler,
-        shuffle=False,  # Shuffle is handled by the sampler
-        num_workers=config.get('num_workers', 2),
-        pin_memory=True,
-        drop_last=True
-    )
-    val_loader = DataLoader(
-        valid_dataset,
-        batch_size=config['batch_size'],
-        sampler=val_sampler,
-        shuffle=False,
-        num_workers=config.get('num_workers', 2),
-        pin_memory=True,
-        drop_last=False
-    )
     print(f"[Rank {rank}] Dataloaders created. Train steps/epoch: {len(train_loader)}, Val steps: {len(val_loader)}")
     return train_loader, val_loader, train_dataset, valid_dataset
 
 
-def train_model(model, device, config, save_dir, logger, rank, world_size):
+def _get_raw_model(model, is_ddp):
+    """Return the underlying model, unwrapping DDP if needed."""
+    return model.module if is_ddp else model
+
+
+def _find_latest_checkpoint(save_dir):
+    """Find the latest epoch checkpoint in save_dir/checkpoints/epoch_N/.
+
+    Returns (epoch_number, checkpoint_path) or (None, None) if none found.
+    """
+    ckpt_root = os.path.join(save_dir, "checkpoints")
+    pattern = os.path.join(ckpt_root, "epoch_*")
+    matches = sorted(glob.glob(pattern))
+    if not matches:
+        return None, None
+    # Extract epoch numbers and pick the largest
+    epochs = []
+    for m in matches:
+        basename = os.path.basename(m)
+        try:
+            epoch_num = int(basename.split("_")[1])
+            epochs.append((epoch_num, m))
+        except (IndexError, ValueError):
+            continue
+    if not epochs:
+        return None, None
+    epochs.sort(key=lambda x: x[0])
+    return epochs[-1]
+
+
+def train_model(model, device, config, save_dir, logger, rank, world_size, is_ddp):
     """
     The main training and validation loop for the tokenizer.
 
     Args:
-        model (DDP): The DDP-wrapped model to train.
+        model: The model to train (DDP-wrapped in distributed mode, plain otherwise).
         device (torch.device): The device for the current process.
         config (dict): Configuration dictionary.
         save_dir (str): Directory to save checkpoints.
-        logger (comet_ml.Experiment): Comet logger instance.
+        logger: Comet logger instance (or None).
         rank (int): Global rank of the process.
         world_size (int): Total number of processes.
+        is_ddp (bool): Whether running in distributed data parallel mode.
 
     Returns:
         tuple: A tuple containing the trained model and a dictionary of results.
     """
     start_time = time.time()
-    if rank == 0:
+    is_main = (rank == 0)
+
+    if is_main:
         effective_bs = config['batch_size'] * world_size * config['accumulation_steps']
-        print(f"[Rank {rank}] BATCHSIZE (per GPU): {config['batch_size']}")
+        device_label = "per GPU" if is_ddp else "per device"
+        print(f"[Rank {rank}] BATCHSIZE ({device_label}): {config['batch_size']}")
         print(f"[Rank {rank}] Effective total batch size: {effective_bs}")
 
-    train_loader, val_loader, train_dataset, valid_dataset = create_dataloaders(config, rank, world_size)
+    train_loader, val_loader, train_dataset, valid_dataset = create_dataloaders(
+        config, rank, world_size, is_ddp
+    )
 
     optimizer = torch.optim.AdamW(
         model.parameters(),
@@ -110,14 +172,34 @@ def train_model(model, device, config, save_dir, logger, rank, world_size):
         div_factor=10
     )
 
+    # --- Checkpoint resume ---
+    start_epoch = 0
     best_val_loss = float('inf')
-    dt_result = {}
-    batch_idx_global_train = 0
+    latest_epoch, latest_ckpt_path = _find_latest_checkpoint(save_dir)
+    if latest_ckpt_path is not None:
+        ckpt_file = os.path.join(latest_ckpt_path, "training_state.pt")
+        if os.path.isfile(ckpt_file):
+            print(f"Resuming from epoch {latest_epoch + 1}")
+            ckpt = torch.load(ckpt_file, map_location=device, weights_only=False)
+            raw_model = _get_raw_model(model, is_ddp)
+            raw_model.load_state_dict(ckpt['model_state_dict'])
+            optimizer.load_state_dict(ckpt['optimizer_state_dict'])
+            # Advance scheduler to match resumed epoch
+            if 'scheduler_state_dict' in ckpt:
+                scheduler.load_state_dict(ckpt['scheduler_state_dict'])
+            start_epoch = ckpt['epoch'] + 1
+            best_val_loss = ckpt.get('best_val_loss', float('inf'))
+            print(f"Checkpoint loaded. Starting at epoch {start_epoch + 1}/{config['epochs']}")
 
-    for epoch_idx in range(config['epochs']):
+    dt_result = {}
+    batch_idx_global_train = start_epoch * len(train_loader)
+
+    for epoch_idx in range(start_epoch, config['epochs']):
         epoch_start_time = time.time()
         model.train()
-        train_loader.sampler.set_epoch(epoch_idx)
+
+        if is_ddp:
+            train_loader.sampler.set_epoch(epoch_idx)
 
         # Set dataset seeds for reproducible sampling
         train_dataset.set_epoch_seed(epoch_idx * 10000 + rank)
@@ -154,18 +236,18 @@ def train_model(model, device, config, save_dir, logger, rank, world_size):
             optimizer.zero_grad()
 
             # --- Logging (Master Process Only) ---
-            if rank == 0 and (batch_idx_global_train + 1) % config['log_interval'] == 0:
+            if is_main and (batch_idx_global_train + 1) % config['log_interval'] == 0:
                 avg_loss = current_batch_total_loss / config['accumulation_steps']
                 print(
                     f"[Rank {rank}, Epoch {epoch_idx + 1}/{config['epochs']}, Step {i + 1}/{len(train_loader)}] "
                     f"LR {optimizer.param_groups[0]['lr']:.6f}, Loss: {avg_loss:.4f}"
                 )
-            if rank == 0 and logger:
+            if is_main and logger:
                 avg_loss = current_batch_total_loss / config['accumulation_steps']
                 logger.log_metric('train_tokenizer_loss_batch', avg_loss, step=batch_idx_global_train)
-                logger.log_metric(f'train_vqvae_vq_loss_each_batch', bsq_loss.item(), step=batch_idx_global_train)
-                logger.log_metric(f'train_recon_loss_pre_each_batch', recon_loss_pre.item(), step=batch_idx_global_train)
-                logger.log_metric(f'train_recon_loss_each_batch', recon_loss_all.item(), step=batch_idx_global_train)
+                logger.log_metric('train_vqvae_vq_loss_each_batch', bsq_loss.item(), step=batch_idx_global_train)
+                logger.log_metric('train_recon_loss_pre_each_batch', recon_loss_pre.item(), step=batch_idx_global_train)
+                logger.log_metric('train_recon_loss_each_batch', recon_loss_all.item(), step=batch_idx_global_train)
                 logger.log_metric('tokenizer_learning_rate', optimizer.param_groups[0]["lr"], step=batch_idx_global_train)
 
             batch_idx_global_train += 1
@@ -184,16 +266,18 @@ def train_model(model, device, config, save_dir, logger, rank, world_size):
                 tot_val_loss_sum_rank += val_loss_item.item() * ori_batch_x.size(0)
                 val_sample_count_rank += ori_batch_x.size(0)
 
-        # Reduce validation losses from all processes
-        val_loss_sum_tensor = torch.tensor(tot_val_loss_sum_rank, device=device)
-        val_count_tensor = torch.tensor(val_sample_count_rank, device=device)
-        dist.all_reduce(val_loss_sum_tensor, op=dist.ReduceOp.SUM)
-        dist.all_reduce(val_count_tensor, op=dist.ReduceOp.SUM)
+        # Aggregate validation losses
+        if is_ddp:
+            val_loss_sum_tensor = torch.tensor(tot_val_loss_sum_rank, device=device)
+            val_count_tensor = torch.tensor(val_sample_count_rank, device=device)
+            dist.all_reduce(val_loss_sum_tensor, op=dist.ReduceOp.SUM)
+            dist.all_reduce(val_count_tensor, op=dist.ReduceOp.SUM)
+            avg_val_loss = val_loss_sum_tensor.item() / val_count_tensor.item() if val_count_tensor.item() > 0 else 0
+        else:
+            avg_val_loss = tot_val_loss_sum_rank / val_sample_count_rank if val_sample_count_rank > 0 else 0
 
-        avg_val_loss = val_loss_sum_tensor.item() / val_count_tensor.item() if val_count_tensor.item() > 0 else 0
-
-        # --- End of Epoch Summary & Checkpointing (Master Process Only) ---
-        if rank == 0:
+        # --- End of Epoch Summary & Checkpointing ---
+        if is_main:
             print(f"\n--- Epoch {epoch_idx + 1}/{config['epochs']} Summary ---")
             print(f"Validation Loss: {avg_val_loss:.4f}")
             print(f"Time This Epoch: {format_time(time.time() - epoch_start_time)}")
@@ -201,15 +285,31 @@ def train_model(model, device, config, save_dir, logger, rank, world_size):
             if logger:
                 logger.log_metric('val_tokenizer_loss_epoch', avg_val_loss, epoch=epoch_idx)
 
+            raw_model = _get_raw_model(model, is_ddp)
+
+            # Save epoch checkpoint (for resume)
+            epoch_ckpt_path = os.path.join(save_dir, "checkpoints", f"epoch_{epoch_idx}")
+            os.makedirs(epoch_ckpt_path, exist_ok=True)
+            torch.save({
+                'epoch': epoch_idx,
+                'model_state_dict': raw_model.state_dict(),
+                'optimizer_state_dict': optimizer.state_dict(),
+                'scheduler_state_dict': scheduler.state_dict(),
+                'best_val_loss': best_val_loss,
+            }, os.path.join(epoch_ckpt_path, "training_state.pt"))
+            print(f"Epoch checkpoint saved to {epoch_ckpt_path}")
+
+            # Save best model
             if avg_val_loss < best_val_loss:
                 best_val_loss = avg_val_loss
                 save_path = f"{save_dir}/checkpoints/best_model"
-                model.module.save_pretrained(save_path)
+                raw_model.save_pretrained(save_path)
                 print(f"Best model saved to {save_path} (Val Loss: {best_val_loss:.4f})")
                 if logger:
                     logger.log_model("best_model", save_path)
 
-        dist.barrier()  # Ensure all processes finish the epoch before starting the next one.
+        if is_ddp:
+            dist.barrier()  # Ensure all processes finish the epoch before starting the next one.
 
     dt_result['best_val_loss'] = best_val_loss
     return model, dt_result
@@ -217,24 +317,26 @@ def train_model(model, device, config, save_dir, logger, rank, world_size):
 
 def main(config: dict):
     """
-    Main function to orchestrate the DDP training process.
+    Main function to orchestrate training.
+
+    Supports both distributed (torchrun) and single-device (python3) execution.
     """
-    rank, world_size, local_rank = setup_ddp()
-    device = torch.device(f"cuda:{local_rank}")
-    set_seed(config['seed'], rank)
+    device, rank, world_size, is_ddp = setup_training(config['seed'])
+    is_main = (rank == 0)
 
     save_dir = os.path.join(config['save_path'], config['tokenizer_save_folder_name'])
 
     # Logger and summary setup (master process only)
     comet_logger, master_summary = None, {}
-    if rank == 0:
+    if is_main:
         os.makedirs(os.path.join(save_dir, 'checkpoints'), exist_ok=True)
         master_summary = {
             'start_time': strftime("%Y-%m-%dT%H-%M-%S", gmtime()),
             'save_directory': save_dir,
             'world_size': world_size,
+            'device': str(device),
         }
-        if config['use_comet']:
+        if config.get('use_comet', False) and comet_ml is not None:
             comet_logger = comet_ml.Experiment(
                 api_key=config['comet_config']['api_key'],
                 project_name=config['comet_config']['project_name'],
@@ -245,23 +347,28 @@ def main(config: dict):
             comet_logger.log_parameters(config)
             print("Comet Logger Initialized.")
 
-    dist.barrier()  # Ensure save directory is created before proceeding
+    if is_ddp:
+        dist.barrier()  # Ensure save directory is created before proceeding
 
     # Model Initialization
     model = KronosTokenizer.from_pretrained(config['pretrained_tokenizer_path'])
     model.to(device)
-    model = DDP(model, device_ids=[local_rank], find_unused_parameters=False)
 
-    if rank == 0:
-        print(f"Model Size: {get_model_size(model.module)}")
+    if is_ddp:
+        local_rank = int(os.environ["LOCAL_RANK"])
+        model = DDP(model, device_ids=[local_rank], find_unused_parameters=False)
+
+    if is_main:
+        raw_model = _get_raw_model(model, is_ddp)
+        print(f"Model Size: {get_model_size(raw_model)}")
 
     # Start Training
     _, dt_result = train_model(
-        model, device, config, save_dir, comet_logger, rank, world_size
+        model, device, config, save_dir, comet_logger, rank, world_size, is_ddp
     )
 
     # Finalize and save summary (master process only)
-    if rank == 0:
+    if is_main:
         master_summary['final_result'] = dt_result
         with open(os.path.join(save_dir, 'summary.json'), 'w') as f:
             json.dump(master_summary, f, indent=4)
@@ -269,13 +376,13 @@ def main(config: dict):
         if comet_logger:
             comet_logger.end()
 
-    cleanup_ddp()
+    if is_ddp:
+        cleanup_ddp()
 
 
 if __name__ == '__main__':
-    # Usage: torchrun --standalone --nproc_per_node=NUM_GPUS train_tokenizer.py
-    if "WORLD_SIZE" not in os.environ:
-        raise RuntimeError("This script must be launched with `torchrun`.")
-
+    # Usage:
+    #   DDP:           torchrun --standalone --nproc_per_node=NUM_GPUS train_tokenizer.py
+    #   Single device: python3 train_tokenizer.py
     config_instance = Config()
     main(config_instance.__dict__)
