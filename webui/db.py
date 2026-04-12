@@ -60,6 +60,19 @@ class Database:
                     pred_data JSON,
                     params JSON
                 );
+                CREATE TABLE IF NOT EXISTS scan_jobs (
+                    scan_id TEXT PRIMARY KEY,
+                    index_code TEXT,
+                    freq TEXT,
+                    model_key TEXT,
+                    status TEXT,
+                    total INTEGER DEFAULT 0,
+                    completed INTEGER DEFAULT 0,
+                    errors TEXT DEFAULT '[]',
+                    current_stock TEXT DEFAULT '',
+                    started_at DATETIME,
+                    updated_at DATETIME
+                );
                 CREATE INDEX IF NOT EXISTS idx_pred_scan ON prediction_results(scan_id);
                 CREATE INDEX IF NOT EXISTS idx_pred_stock ON prediction_results(stock_code, freq, predicted_at DESC);
                 CREATE INDEX IF NOT EXISTS idx_kline_lookup ON kline_data(stock_code, freq, dt DESC);
@@ -273,6 +286,54 @@ class Database:
                 (stock_code,),
             ).fetchone()
             return row["stock_name"] if row else ""
+        finally:
+            conn.close()
+
+    # --- Scan Jobs (persistent progress) ---
+
+    def create_scan_job(self, scan_id, index_code, freq, model_key, total):
+        now = datetime.now().isoformat()
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(
+                    """INSERT OR REPLACE INTO scan_jobs
+                       (scan_id, index_code, freq, model_key, status, total, completed, errors, current_stock, started_at, updated_at)
+                       VALUES (?, ?, ?, ?, 'running', ?, 0, '[]', '', ?, ?)""",
+                    (scan_id, index_code, freq, model_key, total, now, now),
+                )
+                conn.commit()
+            finally:
+                conn.close()
+
+    def update_scan_job(self, scan_id, **kwargs):
+        if not kwargs:
+            return
+        kwargs["updated_at"] = datetime.now().isoformat()
+        set_clause = ", ".join(f"{k} = ?" for k in kwargs)
+        values = list(kwargs.values()) + [scan_id]
+        with self._lock:
+            conn = self._get_conn()
+            try:
+                conn.execute(f"UPDATE scan_jobs SET {set_clause} WHERE scan_id = ?", values)
+                conn.commit()
+            finally:
+                conn.close()
+
+    def get_scan_job(self, scan_id):
+        conn = self._get_conn()
+        try:
+            row = conn.execute("SELECT * FROM scan_jobs WHERE scan_id = ?", (scan_id,)).fetchone()
+            return dict(row) if row else None
+        finally:
+            conn.close()
+
+    def get_latest_scan_job(self):
+        """Get the most recent scan job (for auto-resume)."""
+        conn = self._get_conn()
+        try:
+            row = conn.execute("SELECT * FROM scan_jobs ORDER BY started_at DESC LIMIT 1").fetchone()
+            return dict(row) if row else None
         finally:
             conn.close()
 

@@ -3,70 +3,207 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kronos - {{ symbol }} Detail</title>
+    <title>{{ symbol }} 预测详情 - Kronos</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <style>
         * { margin:0; padding:0; box-sizing:border-box; }
-        body { font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); min-height:100vh; color:#333; }
-        .container { max-width:1400px; margin:0 auto; padding:20px; }
-        .header { text-align:center; margin-bottom:20px; color:white; }
-        .header h1 { font-size:2rem; margin-bottom:5px; }
-        .card { background:white; border-radius:15px; padding:25px; box-shadow:0 10px 30px rgba(0,0,0,0.2); margin-bottom:20px; }
-        .stock-info { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:15px; }
-        .info-item { text-align:center; }
-        .info-item .label { font-size:12px; color:#718096; }
-        .info-item .value { font-size:1.5rem; font-weight:600; }
-        .btn { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:none; padding:10px 20px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
-        .btn:hover { transform:translateY(-2px); box-shadow:0 5px 15px rgba(0,0,0,0.2); }
-        .btn-secondary { background:linear-gradient(135deg,#718096 0%,#4a5568 100%); }
-        #chart { width:100%; height:500px; }
-        .pred-table { width:100%; border-collapse:collapse; margin-top:15px; }
-        .pred-table th, .pred-table td { border:1px solid #e2e8f0; padding:8px; text-align:center; font-size:12px; }
-        .pred-table th { background:#f7fafc; font-weight:600; }
-        nav { display:flex; gap:10px; justify-content:center; margin-bottom:20px; }
-        nav a { color:white; text-decoration:none; padding:8px 16px; border:1px solid rgba(255,255,255,0.3); border-radius:8px; }
-        nav a:hover { background:rgba(255,255,255,0.1); }
-        .spinner { border:4px solid #f3f3f3; border-top:4px solid #667eea; border-radius:50%; width:40px; height:40px; animation:spin 1s linear infinite; margin:20px auto; }
+        body { font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif; background:#f0f2f5; min-height:100vh; color:#1a1a2e; }
+
+        .topbar { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%); padding:12px 24px; display:flex; align-items:center; justify-content:space-between; color:white; }
+        .topbar h1 { font-size:1.3rem; font-weight:700; }
+        .topbar nav a { color:rgba(255,255,255,0.8); text-decoration:none; padding:6px 14px; border-radius:6px; font-size:13px; margin-left:6px; }
+        .topbar nav a:hover { background:rgba(255,255,255,0.15); color:white; }
+
+        .page { max-width:1200px; margin:0 auto; padding:20px; }
+
+        /* 标签页切换 */
+        .tabs { display:flex; gap:4px; margin-bottom:20px; background:white; border-radius:10px; padding:4px; box-shadow:0 1px 3px rgba(0,0,0,0.08); }
+        .tab { flex:1; text-align:center; padding:10px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; color:#6b7280; transition:all 0.2s; }
+        .tab.active { background:#4361ee; color:white; }
+        .tab:hover:not(.active) { background:#f0f0f0; }
+        .tab-content { display:none; }
+        .tab-content.active { display:block; }
+
+        .card { background:white; border-radius:12px; padding:20px; box-shadow:0 1px 3px rgba(0,0,0,0.08); margin-bottom:20px; }
+
+        /* 股票头部 */
+        .stock-hero { display:flex; align-items:baseline; gap:12px; margin-bottom:16px; }
+        .stock-hero .code { font-size:1.8rem; font-weight:800; }
+        .stock-hero .name { font-size:1.1rem; color:#6b7280; }
+        .stock-hero .freq-tag { padding:3px 10px; border-radius:20px; background:#ede9fe; color:#7c3aed; font-size:12px; font-weight:600; }
+
+        .metrics { display:grid; grid-template-columns:repeat(auto-fit,minmax(140px,1fr)); gap:12px; margin-bottom:16px; }
+        .metric { padding:14px; background:#f8fafc; border-radius:10px; text-align:center; }
+        .metric .label { font-size:11px; color:#9ca3af; margin-bottom:2px; }
+        .metric .value { font-size:1.4rem; font-weight:700; }
+        .metric .sub { font-size:11px; color:#9ca3af; margin-top:2px; }
+        .price-up { color:#ef4444; }
+        .price-down { color:#22c55e; }
+
+        .analysis { font-size:14px; line-height:1.8; color:#374151; padding:16px; background:#f8fafc; border-radius:10px; margin-bottom:16px; }
+        .analysis strong { color:#1a1a2e; }
+
+        #chart, #backtest-chart { width:100%; height:420px; }
+
+        .chart-legend { display:flex; gap:16px; font-size:12px; color:#6b7280; margin-bottom:8px; }
+        .chart-legend span { display:flex; align-items:center; gap:4px; }
+        .dot { width:10px; height:10px; border-radius:2px; display:inline-block; }
+
+        /* 准确率仪表盘 */
+        .accuracy-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:12px; margin-bottom:16px; }
+        .acc-card { padding:16px; border-radius:10px; text-align:center; }
+        .acc-card .label { font-size:12px; color:#6b7280; margin-bottom:4px; }
+        .acc-card .value { font-size:2rem; font-weight:800; }
+        .acc-card .desc { font-size:11px; color:#9ca3af; margin-top:4px; }
+        .acc-good { background:#d1fae5; }
+        .acc-good .value { color:#065f46; }
+        .acc-ok { background:#fef3c7; }
+        .acc-ok .value { color:#92400e; }
+        .acc-bad { background:#fee2e2; }
+        .acc-bad .value { color:#991b1b; }
+
+        .btn { display:inline-flex; align-items:center; padding:8px 16px; border:none; border-radius:8px; font-size:13px; font-weight:600; cursor:pointer; }
+        .btn-primary { background:#4361ee; color:white; }
+        .btn-primary:hover { background:#3a56d4; }
+
+        table { width:100%; border-collapse:collapse; }
+        th { background:#f8fafc; padding:8px 12px; font-size:12px; font-weight:600; color:#6b7280; text-align:right; }
+        th:first-child { text-align:left; }
+        td { padding:8px 12px; font-size:13px; border-top:1px solid #f0f0f0; text-align:right; }
+        td:first-child { text-align:left; color:#6b7280; }
+
+        .loading-wrap { display:flex; flex-direction:column; align-items:center; padding:60px; }
+        .spinner { border:3px solid #e5e7eb; border-top:3px solid #4361ee; border-radius:50%; width:36px; height:36px; animation:spin 0.8s linear infinite; }
         @keyframes spin { 0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);} }
+        .loading-text { margin-top:12px; font-size:14px; color:#9ca3af; }
+
+        .disclaimer { font-size:11px; color:#9ca3af; margin-top:8px; padding:8px 12px; background:#fafafa; border-radius:6px; }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>{{ symbol }} Stock Prediction</h1>
-        </div>
+    <div class="topbar">
+        <h1 id="page-title">{{ symbol }} 预测详情</h1>
         <nav>
-            <a href="/">Back to Scan</a>
-            <a href="/search">Search</a>
+            <a href="/">返回扫描</a>
+            <a href="/search">单股搜索</a>
         </nav>
+    </div>
 
-        <div class="card">
-            <div class="stock-info" id="stock-info">
-                <div class="info-item"><div class="label">Code</div><div class="value">{{ symbol }}</div></div>
-                <div class="info-item"><div class="label">Frequency</div><div class="value" id="info-freq">{{ freq }}</div></div>
-                <div class="info-item"><div class="label">Last Close</div><div class="value" id="info-last-close">-</div></div>
-                <div class="info-item"><div class="label">Predicted Change</div><div class="value" id="info-change">-</div></div>
-                <div class="info-item"><div class="label">Target Price</div><div class="value" id="info-target">-</div></div>
+    <div class="page">
+        <!-- 两个标签页 -->
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('predict')">未来预测</div>
+            <div class="tab" onclick="switchTab('backtest')">回测验证（看准确率）</div>
+        </div>
+
+        <!-- ========== 标签1: 未来预测 ========== -->
+        <div class="tab-content active" id="tab-predict">
+            <div id="predict-loading" class="loading-wrap">
+                <div class="spinner"></div>
+                <div class="loading-text">正在获取 {{ symbol }} 的数据并生成预测...</div>
+            </div>
+            <div id="predict-content" style="display:none;">
+                <div class="card">
+                    <div class="stock-hero">
+                        <span class="code">{{ symbol }}</span>
+                        <span class="name" id="p-name"></span>
+                        <span class="freq-tag" id="p-freq"></span>
+                    </div>
+                    <div class="metrics">
+                        <div class="metric">
+                            <div class="label">最新收盘价</div>
+                            <div class="value" id="p-last-close">-</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">预测涨跌幅</div>
+                            <div class="value" id="p-change">-</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">预测目标价</div>
+                            <div class="value" id="p-target">-</div>
+                        </div>
+                        <div class="metric">
+                            <div class="label">预测价格区间</div>
+                            <div class="value" id="p-range">-</div>
+                            <div class="sub" id="p-range-sub"></div>
+                        </div>
+                    </div>
+                    <div class="analysis" id="p-analysis"></div>
+                    <div class="disclaimer">* 以上为AI模型预测，仅供参考，不构成投资建议。模型基于历史K线数据推断，无法预见突发事件。</div>
+                </div>
+
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h3 style="font-size:15px;">K线走势与预测</h3>
+                        <button class="btn btn-primary" onclick="loadPrediction()">重新预测</button>
+                    </div>
+                    <div class="chart-legend">
+                        <span><span class="dot" style="background:#ef4444;"></span> 历史涨</span>
+                        <span><span class="dot" style="background:#22c55e;"></span> 历史跌</span>
+                        <span><span class="dot" style="background:#f59e0b;"></span> 预测涨</span>
+                        <span><span class="dot" style="background:#8b5cf6;"></span> 预测跌</span>
+                        <span><span class="dot" style="background:#4361ee; width:20px; height:2px; border-radius:0;"></span> 预测起点</span>
+                    </div>
+                    <div id="chart"></div>
+                </div>
+
+                <div class="card">
+                    <h3 style="font-size:15px; margin-bottom:12px;">预测明细数据</h3>
+                    <div style="max-height:300px; overflow-y:auto;">
+                        <table>
+                            <thead><tr><th style="text-align:left">时间</th><th>开盘</th><th>最高</th><th>最低</th><th>收盘</th><th>涨跌</th></tr></thead>
+                            <tbody id="pred-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
 
-        <div class="card">
-            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                <h2 style="color:#4a5568;">K-Line Chart</h2>
-                <button class="btn" id="repredict-btn" onclick="repredict()">Re-Predict</button>
+        <!-- ========== 标签2: 回测验证 ========== -->
+        <div class="tab-content" id="tab-backtest">
+            <div id="backtest-loading" class="loading-wrap" style="display:none;">
+                <div class="spinner"></div>
+                <div class="loading-text">正在回测 {{ symbol }}，用历史数据验证模型准确率...</div>
             </div>
-            <div id="loading" style="display:none;"><div class="spinner"></div><p style="text-align:center;">Predicting...</p></div>
-            <div id="chart"></div>
-        </div>
+            <div id="backtest-empty" class="card" style="text-align:center; padding:40px;">
+                <p style="font-size:16px; color:#374151; margin-bottom:8px;">回测验证：用历史数据检验模型预测的准确性</p>
+                <p style="font-size:13px; color:#9ca3af; margin-bottom:16px;">
+                    系统会截取一段已经发生的历史数据，让模型"假装不知道"后面的走势去预测，<br>
+                    然后对比预测结果和真实走势，计算准确率。这样你就能知道模型靠不靠谱。
+                </p>
+                <button class="btn btn-primary" onclick="loadBacktest()">开始回测验证</button>
+            </div>
+            <div id="backtest-content" style="display:none;">
+                <div class="card">
+                    <h3 style="font-size:15px; margin-bottom:12px;">准确率评估</h3>
+                    <div class="accuracy-grid" id="acc-grid"></div>
+                    <div class="analysis" id="bt-analysis"></div>
+                </div>
 
-        <div class="card" id="pred-detail" style="display:none;">
-            <h2 style="color:#4a5568; margin-bottom:15px;">Prediction Detail</h2>
-            <div style="max-height:400px; overflow-y:auto;">
-                <table class="pred-table">
-                    <thead><tr><th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th></tr></thead>
-                    <tbody id="pred-tbody"></tbody>
-                </table>
+                <div class="card">
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                        <h3 style="font-size:15px;">回测对比图：预测 vs 实际</h3>
+                        <button class="btn btn-primary" onclick="loadBacktest()">重新回测</button>
+                    </div>
+                    <div class="chart-legend">
+                        <span><span class="dot" style="background:#6b7280;"></span> 历史走势</span>
+                        <span><span class="dot" style="background:#f59e0b;"></span> 模型预测</span>
+                        <span><span class="dot" style="background:#4361ee;"></span> 真实走势</span>
+                        <span><span class="dot" style="background:#4361ee; width:20px; height:2px; border-radius:0;"></span> 回测起点</span>
+                    </div>
+                    <div id="backtest-chart"></div>
+                </div>
+
+                <div class="card">
+                    <h3 style="font-size:15px; margin-bottom:12px;">逐根K线对比</h3>
+                    <div style="max-height:300px; overflow-y:auto;">
+                        <table>
+                            <thead><tr><th style="text-align:left">时间</th><th>实际收盘</th><th>预测收盘</th><th>误差</th><th>方向</th></tr></thead>
+                            <tbody id="bt-tbody"></tbody>
+                        </table>
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -77,67 +214,193 @@
 
         document.addEventListener('DOMContentLoaded', loadPrediction);
 
-        async function loadPrediction() {
-            document.getElementById('loading').style.display = 'block';
-            try {
-                const response = await axios.post('/api/predict-symbol', {
-                    stock_code: symbol, freq: freq, sample_count: 3
-                });
-                if (response.data.success) {
-                    renderResult(response.data);
-                }
-            } catch (e) {
-                alert('Prediction failed: ' + (e.response?.data?.error || e.message));
-            } finally {
-                document.getElementById('loading').style.display = 'none';
+        // ===== 标签切换 =====
+        function switchTab(name) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+            if (name === 'predict') {
+                document.querySelectorAll('.tab')[0].classList.add('active');
+                document.getElementById('tab-predict').classList.add('active');
+            } else {
+                document.querySelectorAll('.tab')[1].classList.add('active');
+                document.getElementById('tab-backtest').classList.add('active');
             }
         }
 
-        function renderResult(data) {
-            document.getElementById('info-last-close').textContent = data.last_close.toFixed(2);
-            const changePct = data.pred_change_pct;
-            const changeEl = document.getElementById('info-change');
-            changeEl.textContent = (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%';
-            changeEl.style.color = changePct >= 0 ? '#EF5350' : '#26A69A';
-            document.getElementById('info-target').textContent = data.pred_close.toFixed(2);
+        // ===== 未来预测 =====
+        async function loadPrediction() {
+            document.getElementById('predict-loading').style.display = 'flex';
+            document.getElementById('predict-content').style.display = 'none';
+            try {
+                const r = await axios.post('/api/predict-symbol', { stock_code: symbol, freq, sample_count: 3 });
+                if (r.data.success) renderPrediction(r.data);
+            } catch(e) {
+                document.getElementById('predict-loading').innerHTML = '<div style="color:#ef4444;">预测失败：' + (e.response?.data?.error || e.message) + '</div>';
+            }
+        }
 
-            const hist = data.historical;
+        function renderPrediction(data) {
+            document.getElementById('predict-loading').style.display = 'none';
+            document.getElementById('predict-content').style.display = 'block';
+
+            const freqText = freq === 'daily' ? '日线' : '5分钟线';
+            document.getElementById('p-freq').textContent = freqText;
+            document.getElementById('p-name').textContent = data.stock_name || '';
+            document.getElementById('page-title').textContent = (data.stock_name || symbol) + ' 预测详情';
+
+            const lastClose = data.last_close;
+            const predClose = data.pred_close;
+            const changePct = data.pred_change_pct;
+            const cls = changePct >= 0 ? 'price-up' : 'price-down';
+            const sign = changePct >= 0 ? '+' : '';
             const preds = data.predictions;
             const predTs = data.pred_timestamps;
 
-            const histTrace = {
-                x: hist.map(r => r.dt), open: hist.map(r => r.open),
-                high: hist.map(r => r.high), low: hist.map(r => r.low), close: hist.map(r => r.close),
-                type: 'candlestick', name: 'Historical',
-                increasing: {line: {color: '#EF5350'}}, decreasing: {line: {color: '#26A69A'}},
-            };
-            const predTrace = {
-                x: predTs, open: preds.map(r => r.open),
-                high: preds.map(r => r.high), low: preds.map(r => r.low), close: preds.map(r => r.close),
-                type: 'candlestick', name: 'Predicted',
-                increasing: {line: {color: '#FF7043'}}, decreasing: {line: {color: '#66BB6A'}},
-            };
-            Plotly.newPlot('chart', [histTrace, predTrace], {
-                title: symbol + ' - ' + freq,
-                xaxis: {title: 'Date', rangeslider: {visible: false}},
-                yaxis: {title: 'Price'},
-                template: 'plotly_white', height: 500,
-            });
+            document.getElementById('p-last-close').textContent = lastClose.toFixed(2);
+            document.getElementById('p-change').textContent = sign + changePct.toFixed(2) + '%';
+            document.getElementById('p-change').className = 'value ' + cls;
+            document.getElementById('p-target').textContent = predClose.toFixed(2);
+            document.getElementById('p-target').className = 'value ' + cls;
 
-            const tbody = document.getElementById('pred-tbody');
-            tbody.innerHTML = '';
-            preds.forEach((p, i) => {
-                tbody.innerHTML += '<tr>' +
-                    '<td>' + predTs[i] + '</td>' +
-                    '<td>' + p.open.toFixed(2) + '</td><td>' + p.high.toFixed(2) + '</td>' +
-                    '<td>' + p.low.toFixed(2) + '</td><td>' + p.close.toFixed(2) + '</td>' +
-                    '</tr>';
-            });
-            document.getElementById('pred-detail').style.display = 'block';
+            const predHigh = Math.max(...preds.map(p => p.high));
+            const predLow = Math.min(...preds.map(p => p.low));
+            const predDays = freq === 'daily' ? preds.length + '个交易日' : preds.length + '根K线';
+            document.getElementById('p-range').textContent = predLow.toFixed(2) + ' ~ ' + predHigh.toFixed(2);
+            document.getElementById('p-range-sub').textContent = '未来' + predDays;
+
+            // 预测解读
+            const dir = changePct >= 0 ? '上涨' : '下跌';
+            const absChg = Math.abs(changePct).toFixed(2);
+            const strength = Math.abs(changePct) < 1 ? '小幅' : Math.abs(changePct) < 3 ? '中幅' : '大幅';
+            document.getElementById('p-analysis').innerHTML =
+                `模型预测 <strong>${data.stock_name || symbol}</strong> 未来${predDays}` +
+                `<strong class="${cls}" style="font-size:15px;"> ${strength}${dir} ${sign}${absChg}%</strong>，` +
+                `收盘价从 <strong>${lastClose.toFixed(2)}</strong> 元 → <strong class="${cls}">${predClose.toFixed(2)}</strong> 元，` +
+                `波动区间 ${predLow.toFixed(2)} ~ ${predHigh.toFixed(2)} 元。`;
+
+            // 图表
+            const hist = data.historical;
+            const showN = Math.min(hist.length, Math.max(preds.length * 3, 60));
+            const recent = hist.slice(-showN);
+            const lastHistDt = recent[recent.length - 1]?.dt;
+
+            Plotly.newPlot('chart', [
+                { x: recent.map(r=>r.dt), open: recent.map(r=>r.open), high: recent.map(r=>r.high), low: recent.map(r=>r.low), close: recent.map(r=>r.close), type:'candlestick', name:'历史', increasing:{line:{color:'#ef4444'}}, decreasing:{line:{color:'#22c55e'}} },
+                { x: predTs, open: preds.map(r=>r.open), high: preds.map(r=>r.high), low: preds.map(r=>r.low), close: preds.map(r=>r.close), type:'candlestick', name:'预测', increasing:{line:{color:'#f59e0b'},fillcolor:'rgba(245,158,11,0.3)'}, decreasing:{line:{color:'#8b5cf6'},fillcolor:'rgba(139,92,246,0.3)'} },
+            ], {
+                xaxis:{rangeslider:{visible:false}}, yaxis:{title:'价格 (元)'}, template:'plotly_white', height:420, margin:{l:50,r:20,t:20,b:40}, showlegend:false,
+                shapes: lastHistDt ? [{type:'line',x0:lastHistDt,x1:lastHistDt,y0:0,y1:1,yref:'paper',line:{color:'#4361ee',width:2,dash:'dash'}}] : [],
+                annotations: lastHistDt ? [{x:lastHistDt,y:1.02,yref:'paper',text:'← 历史 | 预测 →',showarrow:false,font:{size:11,color:'#4361ee'}}] : [],
+            }, {responsive:true});
+
+            // 明细
+            let prev = lastClose;
+            document.getElementById('pred-tbody').innerHTML = preds.map((p,i) => {
+                const chg = (p.close-prev)/prev*100; const s = chg>=0?'+':''; const c = chg>=0?'price-up':'price-down';
+                const row = `<tr><td>${predTs[i]}</td><td>${p.open.toFixed(2)}</td><td>${p.high.toFixed(2)}</td><td>${p.low.toFixed(2)}</td><td>${p.close.toFixed(2)}</td><td class="${c}">${s}${chg.toFixed(2)}%</td></tr>`;
+                prev=p.close; return row;
+            }).join('');
         }
 
-        async function repredict() {
-            await loadPrediction();
+        // ===== 回测验证 =====
+        async function loadBacktest() {
+            document.getElementById('backtest-empty').style.display = 'none';
+            document.getElementById('backtest-loading').style.display = 'flex';
+            document.getElementById('backtest-content').style.display = 'none';
+            try {
+                const r = await axios.post('/api/backtest-symbol', { stock_code: symbol, freq, sample_count: 3 });
+                if (r.data.success) renderBacktest(r.data);
+            } catch(e) {
+                document.getElementById('backtest-loading').innerHTML = '<div style="color:#ef4444;">回测失败：' + (e.response?.data?.error || e.message) + '</div>';
+            }
+        }
+
+        function renderBacktest(data) {
+            document.getElementById('backtest-loading').style.display = 'none';
+            document.getElementById('backtest-content').style.display = 'block';
+
+            const m = data.metrics;
+
+            // 准确率卡片
+            function accClass(val, good, ok) { return val >= good ? 'acc-good' : val >= ok ? 'acc-ok' : 'acc-bad'; }
+            const dirIcon = m.overall_direction_correct ? '&#10004;' : '&#10008;';
+            const dirText = m.overall_direction_correct ? '正确' : '错误';
+            const dirCls = m.overall_direction_correct ? 'acc-good' : 'acc-bad';
+
+            document.getElementById('acc-grid').innerHTML = `
+                <div class="acc-card ${dirCls}">
+                    <div class="label">整体方向预测</div>
+                    <div class="value">${dirIcon} ${dirText}</div>
+                    <div class="desc">实际${m.actual_change_pct>0?'涨':'跌'}${Math.abs(m.actual_change_pct).toFixed(2)}%，预测${m.pred_change_pct>0?'涨':'跌'}${Math.abs(m.pred_change_pct).toFixed(2)}%</div>
+                </div>
+                <div class="acc-card ${accClass(m.direction_accuracy, 55, 45)}">
+                    <div class="label">逐根方向准确率</div>
+                    <div class="value">${m.direction_accuracy.toFixed(1)}%</div>
+                    <div class="desc">每根K线涨跌方向是否预测对</div>
+                </div>
+                <div class="acc-card ${accClass(100 - m.mape, 97, 94)}">
+                    <div class="label">价格平均误差 (MAPE)</div>
+                    <div class="value">${m.mape.toFixed(2)}%</div>
+                    <div class="desc">预测价格与实际价格的平均偏差</div>
+                </div>
+                <div class="acc-card" style="background:#f0f0f0;">
+                    <div class="label">绝对误差 (MAE)</div>
+                    <div class="value" style="color:#374151;">${m.mae.toFixed(4)}</div>
+                    <div class="desc">预测收盘价与实际的平均差值 (元)</div>
+                </div>
+            `;
+
+            // 解读
+            const freqText = freq === 'daily' ? '日' : '5分钟';
+            const periodText = `${data.backtest_start.split('T')[0].split(' ')[0]} 至 ${data.backtest_end.split('T')[0].split(' ')[0]}`;
+            let verdict = '';
+            if (m.overall_direction_correct && m.mape < 3) verdict = '模型对这只股票的近期预测<strong class="price-up">表现较好</strong>，方向判断正确且误差较小。';
+            else if (m.overall_direction_correct) verdict = '模型<strong>方向判断正确</strong>，但价格偏差较大，建议参考方向而非具体价位。';
+            else verdict = '模型在该股票的近期回测中<strong class="price-down">方向判断有误</strong>，对这只股票的预测需谨慎参考。';
+
+            document.getElementById('bt-analysis').innerHTML =
+                `<strong>回测区间：</strong>${periodText}<br>` +
+                `系统用模型对这段时间的走势进行了"事后预测"，并与真实走势对比。<br>` + verdict;
+
+            // 回测图表 - 三条线：历史、预测、实际
+            const hist = data.historical;
+            const preds = data.predictions;
+            const actual = data.actual;
+            const predTs = data.pred_timestamps;
+            const showN = Math.min(hist.length, Math.max(preds.length * 3, 60));
+            const recent = hist.slice(-showN);
+            const lastHistDt = recent[recent.length - 1]?.dt;
+
+            // 收盘价折线更清晰
+            Plotly.newPlot('backtest-chart', [
+                { x: recent.map(r=>r.dt), y: recent.map(r=>r.close), type:'scatter', mode:'lines', name:'历史收盘', line:{color:'#9ca3af',width:1.5} },
+                { x: predTs, y: preds.map(r=>r.close), type:'scatter', mode:'lines+markers', name:'模型预测', line:{color:'#f59e0b',width:2.5}, marker:{size:4} },
+                { x: actual.map(r=>r.dt), y: actual.map(r=>r.close), type:'scatter', mode:'lines+markers', name:'真实走势', line:{color:'#4361ee',width:2.5}, marker:{size:4} },
+            ], {
+                xaxis:{rangeslider:{visible:false}}, yaxis:{title:'收盘价 (元)'}, template:'plotly_white', height:420, margin:{l:50,r:20,t:20,b:40},
+                legend:{orientation:'h',y:1.08},
+                shapes: lastHistDt ? [{type:'line',x0:lastHistDt,x1:lastHistDt,y0:0,y1:1,yref:'paper',line:{color:'#4361ee',width:2,dash:'dash'}}] : [],
+                annotations: lastHistDt ? [{x:lastHistDt,y:1.02,yref:'paper',text:'← 历史 | 回测区间 →',showarrow:false,font:{size:11,color:'#4361ee'}}] : [],
+            }, {responsive:true});
+
+            // 对比表格
+            document.getElementById('bt-tbody').innerHTML = preds.map((p,i) => {
+                if (i >= actual.length) return '';
+                const a = actual[i];
+                const err = Math.abs(p.close - a.close).toFixed(4);
+                const errPct = (Math.abs(p.close - a.close) / a.close * 100).toFixed(2);
+                const actualDir = i > 0 ? (a.close > actual[i-1].close ? '涨' : '跌') : '-';
+                const predDir = i > 0 ? (p.close > preds[i-1].close ? '涨' : '跌') : '-';
+                const dirMatch = (actualDir === predDir || actualDir === '-') ? '&#10004;' : '&#10008;';
+                const dirColor = (actualDir === predDir || actualDir === '-') ? '#22c55e' : '#ef4444';
+                return `<tr>
+                    <td>${predTs[i]}</td>
+                    <td>${a.close.toFixed(2)}</td>
+                    <td>${p.close.toFixed(2)}</td>
+                    <td>${errPct}%</td>
+                    <td style="color:${dirColor}">${dirMatch} ${actualDir === '-' ? '' : (actualDir + '→' + predDir)}</td>
+                </tr>`;
+            }).join('');
         }
     </script>
 </body>

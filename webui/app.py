@@ -756,12 +756,33 @@ def start_scan():
 
 @app.route('/api/scan/status')
 def scan_status():
-    """Get scan progress with lightweight results (no pred_data)."""
-    if current_scan is None:
-        return jsonify({'status': 'idle', 'message': 'No scan running'})
-    state = current_scan.get_state()
-    if state["completed"] > 0:
-        db, _ = get_db()
+    """Get scan progress with lightweight results (no pred_data).
+
+    If no in-memory scan is running, check DB for the latest scan job
+    so page refresh can recover progress.
+    """
+    db, _ = get_db()
+
+    if current_scan is not None:
+        state = current_scan.get_state()
+    else:
+        # Try to recover from DB
+        job = db.get_latest_scan_job()
+        if job and job["status"] in ("running", "completed", "stopped"):
+            import json as _json
+            state = {
+                "scan_id": job["scan_id"],
+                "status": job["status"] if job["status"] != "running" else "completed",  # if server restarted mid-scan, mark as completed
+                "total": job["total"],
+                "completed": job["completed"],
+                "current_stock": job.get("current_stock", ""),
+                "errors": _json.loads(job.get("errors", "[]")) if isinstance(job.get("errors"), str) else [],
+                "started_at": job.get("started_at"),
+            }
+        else:
+            return jsonify({'status': 'idle', 'message': 'No scan running'})
+
+    if state.get("completed", 0) > 0 and state.get("scan_id"):
         results = db.get_scan_results_summary(state["scan_id"], page=1, page_size=1000)
         state["results"] = results
     return jsonify(state)

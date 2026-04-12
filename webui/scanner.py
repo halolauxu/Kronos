@@ -68,6 +68,19 @@ class ScanTask:
     def stop(self):
         self._state["status"] = "stopped"
 
+    def _sync_to_db(self):
+        """Persist current scan state to DB so page refresh doesn't lose progress."""
+        try:
+            self.db.update_scan_job(
+                self.scan_id,
+                status=self._state["status"],
+                completed=self._state["completed"],
+                current_stock=self._state["current_stock"],
+                errors=json.dumps(self._state["errors"][-50:]),  # keep last 50
+            )
+        except Exception:
+            pass  # non-critical
+
     def run(self):
         """Run the scan synchronously. Called directly for testing or via start() for background."""
         self._state["status"] = "running"
@@ -76,6 +89,11 @@ class ScanTask:
         try:
             constituents = self.data_provider.fetch_constituents(self.index_code)
             self._state["total"] = len(constituents)
+
+            # Persist scan job to DB
+            self.db.create_scan_job(
+                self.scan_id, self.index_code, self.freq, self.model_key, len(constituents)
+            )
 
             lookback = self.params["lookback"]
             pred_len = self.params["pred_len"]
@@ -92,8 +110,9 @@ class ScanTask:
                 try:
                     kline_df = self.data_provider.fetch_kline(code, self.freq)
                     if kline_df is None or len(kline_df) < lookback:
-                        self._state["errors"].append(f"{code}: insufficient data ({len(kline_df) if kline_df is not None else 0} rows)")
+                        self._state["errors"].append(f"{code}: data insufficient ({len(kline_df) if kline_df is not None else 0})")
                         self._state["completed"] += 1
+                        self._sync_to_db()
                         continue
 
                     batch.append({
@@ -104,19 +123,23 @@ class ScanTask:
 
                     if len(batch) >= BATCH_SIZE or stock == constituents[-1]:
                         self._process_batch(batch, lookback, pred_len)
+                        self._sync_to_db()
                         batch = []
 
                 except Exception as e:
                     self._state["errors"].append(f"{code}: {str(e)}")
                     self._state["completed"] += 1
+                    self._sync_to_db()
 
             if self._state["status"] == "running":
                 self._state["status"] = "completed"
             self._state["current_stock"] = ""
+            self._sync_to_db()
 
         except Exception as e:
             self._state["status"] = "error"
             self._state["errors"].append(f"Scan error: {str(e)}")
+            self._sync_to_db()
 
     def _process_batch(self, batch, lookback, pred_len):
         """Process a batch of stocks through predict_batch."""

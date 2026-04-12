@@ -149,29 +149,31 @@ class DataProvider:
         self.db.upsert_constituents(index_code, stocks)
         return self.db.get_constituents(index_code)
 
-    def fetch_kline(self, stock_code, freq, max_retries=3):
-        """Fetch kline data with incremental update. Returns DataFrame from DB."""
+    def fetch_kline(self, stock_code, freq, max_retries=5):
+        """Fetch kline data with incremental update. Returns DataFrame from DB.
+
+        Strategy: try to fetch from akshare, but always fall back to DB cache.
+        This means the first scan may have gaps, but subsequent scans fill them in.
+        """
         last_dt = self.db.get_last_kline_dt(stock_code, freq)
 
         raw_df = self._fetch_kline_from_akshare(stock_code, freq, max_retries)
-        if raw_df is None or raw_df.empty:
-            return self.db.get_kline(stock_code, freq, limit=600)
+        if raw_df is not None and not raw_df.empty:
+            cleaned = self._clean_kline(raw_df, freq)
+            if last_dt:
+                last_dt_parsed = pd.to_datetime(last_dt)
+                cleaned = cleaned[cleaned["dt"] > last_dt_parsed]
+            if not cleaned.empty:
+                self.db.upsert_kline(stock_code, freq, cleaned)
 
-        cleaned = self._clean_kline(raw_df, freq)
-
-        if last_dt:
-            last_dt_parsed = pd.to_datetime(last_dt)
-            cleaned = cleaned[cleaned["dt"] > last_dt_parsed]
-
-        if not cleaned.empty:
-            self.db.upsert_kline(stock_code, freq, cleaned)
-
+        # Always return from DB (may have data from previous runs even if fetch failed)
         return self.db.get_kline(stock_code, freq, limit=600)
 
-    def _fetch_kline_from_akshare(self, stock_code, freq, max_retries=3):
+    def _fetch_kline_from_akshare(self, stock_code, freq, max_retries=5):
         if ak is None:
             raise ImportError("akshare is not installed. Run: pip install akshare")
 
+        last_error = None
         for attempt in range(1, max_retries + 1):
             try:
                 if freq == "daily":
@@ -180,9 +182,10 @@ class DataProvider:
                     df = ak.stock_zh_a_hist_min_em(symbol=stock_code, period="5", adjust="")
                 if df is not None and not df.empty:
                     return df
-            except Exception:
-                pass
-            time.sleep(1.0)
+            except Exception as e:
+                last_error = e
+            # Exponential backoff: 0.5s, 1s, 2s, 4s, 8s
+            time.sleep(min(0.5 * (2 ** (attempt - 1)), 8))
         return None
 
     def _clean_kline(self, df, freq):

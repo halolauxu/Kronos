@@ -3,1477 +3,520 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Kronos Financial Prediction Web UI</title>
+    <title>Kronos A股预测系统</title>
     <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
     <style>
-        * {
-            margin: 0;
-            padding: 0;
-            box-sizing: border-box;
-        }
-
-        body {
-            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            min-height: 100vh;
-            color: #333;
-        }
-
-        .container {
-            max-width: 1400px;
-            margin: 0 auto;
-            padding: 20px;
-        }
-
-        .header {
-            text-align: center;
-            margin-bottom: 30px;
-            color: white;
-        }
-
-        .header h1 {
-            font-size: 2.5rem;
-            margin-bottom: 10px;
-            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
-        }
-
-        .header p {
-            font-size: 1.1rem;
-            opacity: 0.9;
-        }
-
-        .main-content {
-            display: grid;
-            grid-template-columns: 1fr 2fr;
-            gap: 30px;
-            margin-bottom: 30px;
-        }
-
-        .control-panel {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-            height: fit-content;
-        }
-
-        .control-panel h2 {
-            color: #4a5568;
-            margin-bottom: 20px;
-            font-size: 1.5rem;
-            border-bottom: 2px solid #e2e8f0;
-            padding-bottom: 10px;
-        }
-
-        .form-group {
-            margin-bottom: 20px;
-        }
-
-        .form-group label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: 600;
-            color: #4a5568;
-        }
-
-        .form-group select,
-        .form-group input {
-            width: 100%;
-            padding: 12px;
-            border: 2px solid #e2e8f0;
-            border-radius: 8px;
-            font-size: 14px;
-            transition: border-color 0.3s ease;
-        }
-
-        .form-group select:focus,
-        .form-group input:focus {
-            outline: none;
-            border-color: #667eea;
-        }
-
-        /* Prediction quality parameter styles */
-        .form-group input[type="range"] {
-            width: 70%;
-            margin-right: 10px;
-        }
-
-        .form-group input[type="number"] {
-            width: 100%;
-        }
-
-        .form-group span {
-            display: inline-block;
-            min-width: 40px;
-            font-weight: 600;
-            color: #667eea;
-        }
-
-        .form-text {
-            font-size: 12px;
-            color: #718096;
-            margin-top: 5px;
-        }
-
-        .btn {
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border: none;
-            padding: 12px 24px;
-            border-radius: 8px;
-            font-size: 16px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: transform 0.2s ease, box-shadow 0.2s ease;
-            width: 100%;
-            margin-bottom: 10px;
-        }
-
-        .btn:hover {
-            transform: translateY(-2px);
-            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
-        }
-
-        .btn:disabled {
-            opacity: 0.6;
-            cursor: not-allowed;
-            transform: none;
-        }
-
-        .btn-secondary {
-            background: linear-gradient(135deg, #718096 0%, #4a5568 100%);
-        }
-
-        .btn-success {
-            background: linear-gradient(135deg, #48bb78 0%, #38a169 100%);
-        }
-
-        .btn-warning {
-            background: linear-gradient(135deg, #ed8936 0%, #dd6b20 100%);
-        }
-
-        .status {
-            padding: 15px;
-            border-radius: 8px;
-            margin-bottom: 20px;
-            font-weight: 500;
-        }
-
-        .status.success {
-            background: #c6f6d5;
-            color: #22543d;
-            border: 1px solid #9ae6b4;
-        }
-
-        .status.error {
-            background: #fed7d7;
-            color: #742a2a;
-            border: 1px solid #feb2b2;
-        }
-
-        .status.info {
-            background: #bee3f8;
-            color: #2a4365;
-            border: 1px solid #90cdf4;
-        }
-
-        .status.warning {
-            background: #fef5e7;
-            color: #744210;
-            border: 1px solid #fbd38d;
-        }
-
-        .chart-container {
-            background: white;
-            border-radius: 15px;
-            padding: 25px;
-            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
-        }
-
-        .chart-container h2 {
-            color: #4a5568;
-            margin-bottom: 20px;
-            font-size: 1.5rem;
-            border-bottom: 2px solid #e2e8f0;
-            padding-bottom: 10px;
-        }
-
-        #chart {
-            width: 100%;
-            height: 600px;
-        }
-
-        .data-info {
-            background: #f7fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-
-        .data-info h3 {
-            color: #4a5568;
-            margin-bottom: 10px;
-            font-size: 1.1rem;
-        }
-
-        .data-info p {
-            margin-bottom: 5px;
-            color: #4a5568;
-        }
-
-        .data-info strong {
-            color: #2d3748;
-        }
-
-        /* Time window selector styles */
-        .time-window-container {
-            background: #f7fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 20px;
-            margin-bottom: 20px;
-        }
-
-        .time-window-container h3 {
-            color: #4a5568;
-            margin-bottom: 15px;
-            font-size: 1.1rem;
-        }
-
-        .time-window-info {
-            display: flex;
-            justify-content: space-between;
-            margin-bottom: 15px;
-            font-size: 12px;
-            color: #666;
-        }
-
-        .time-window-slider {
-            position: relative;
-            margin-bottom: 10px;
-        }
-
-        .slider-track {
-            position: relative;
-            height: 6px;
-            background: #e2e8f0;
-            border-radius: 3px;
-            cursor: pointer;
-        }
-
-        .slider-handle {
-            position: absolute;
-            top: -7px;
-            width: 20px;
-            height: 20px;
-            background: #667eea;
-            border-radius: 50%;
-            cursor: grab;
-            border: 2px solid white;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            z-index: 10;
-        }
-
-        .slider-handle:hover {
-            background: #5a67d8;
-            transform: scale(1.1);
-        }
-
-        .slider-handle:active {
-            cursor: grabbing;
-        }
-
-        .slider-selection {
-            position: absolute;
-            height: 6px;
-            background: #48bb78;
-            border-radius: 3px;
-            top: 0;
-        }
-
-        .slider-labels {
-            display: flex;
-            justify-content: space-between;
-            font-size: 11px;
-            color: #999;
-            margin-top: 5px;
-        }
-
-        /* Comparison analysis styles */
-        .comparison-section {
-            background: #f7fafc;
-            border: 1px solid #e2e8f0;
-            border-radius: 8px;
-            padding: 20px;
-            margin-top: 20px;
-        }
-
-        .comparison-section h3 {
-            color: #4a5568;
-            margin-bottom: 15px;
-            font-size: 1.1rem;
-        }
-
-        .comparison-info {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 15px;
-            margin-bottom: 15px;
-        }
-
-        .comparison-table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 15px;
-        }
-
-        .comparison-table th,
-        .comparison-table td {
-            border: 1px solid #e2e8f0;
-            padding: 8px;
-            text-align: center;
-            font-size: 12px;
-        }
-
-        .comparison-table th {
-            background: #f7fafc;
-            font-weight: 600;
-        }
-
-        .error-stats {
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-            gap: 15px;
-            margin-top: 15px;
-        }
-
-        .error-stat {
-            background: white;
-            border: 1px solid #e2e8f0;
-            border-radius: 6px;
-            padding: 15px;
-            text-align: center;
-        }
-
-        .error-stat h4 {
-            color: #4a5568;
-            margin-bottom: 5px;
-            font-size: 0.9rem;
-        }
-
-        .error-stat .value {
-            font-size: 1.5rem;
-            font-weight: 600;
-            color: #667eea;
-        }
-
-        .error-stat .unit {
-            font-size: 0.8rem;
-            color: #718096;
-        }
-
-        .loading {
-            display: none;
-            text-align: center;
-            padding: 20px;
-        }
-
-        .loading.show {
-            display: block;
-        }
-
-        .spinner {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid #667eea;
-            border-radius: 50%;
-            width: 40px;
-            height: 40px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 10px;
-        }
-
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
-        }
-
-        .model-info {
-            background: #e6fffa;
-            border: 1px solid #81e6d9;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
-        }
-
-        .model-info h3 {
-            color: #234e52;
-            margin-bottom: 10px;
-            font-size: 1.1rem;
-        }
-
-        .model-info p {
-            margin-bottom: 5px;
-            color: #234e52;
-        }
-
-        .model-info strong {
-            color: #0f2027;
-        }
-
-        @media (max-width: 768px) {
-            .main-content {
-                grid-template-columns: 1fr;
-            }
-            
-            .container {
-                padding: 10px;
-            }
-            
-            .header h1 {
-                font-size: 2rem;
-            }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei','Segoe UI',sans-serif; background:#f0f2f5; min-height:100vh; color:#1a1a2e; }
+
+        .topbar { background:linear-gradient(135deg,#1a1a2e 0%,#16213e 100%); padding:12px 24px; display:flex; align-items:center; justify-content:space-between; color:white; position:sticky; top:0; z-index:100; }
+        .topbar h1 { font-size:1.3rem; font-weight:700; }
+        .topbar nav { display:flex; gap:8px; }
+        .topbar nav a { color:rgba(255,255,255,0.8); text-decoration:none; padding:6px 14px; border-radius:6px; font-size:13px; transition:all 0.2s; }
+        .topbar nav a:hover, .topbar nav a.active { background:rgba(255,255,255,0.15); color:white; }
+
+        .page { max-width:1400px; margin:0 auto; padding:20px; }
+
+        /* 引导提示 */
+        .guide-banner { background:linear-gradient(135deg,#dbeafe,#ede9fe); border-radius:12px; padding:16px 20px; margin-bottom:20px; display:flex; align-items:center; gap:12px; }
+        .guide-banner .icon { font-size:24px; }
+        .guide-banner .text { font-size:14px; color:#374151; line-height:1.6; }
+        .guide-banner .text strong { color:#4361ee; }
+        .guide-banner .close-btn { margin-left:auto; cursor:pointer; color:#9ca3af; font-size:18px; padding:4px; }
+
+        .steps { display:flex; gap:12px; margin-bottom:20px; }
+        .step { flex:1; background:white; border-radius:12px; padding:16px; box-shadow:0 1px 3px rgba(0,0,0,0.08); border:2px solid transparent; }
+        .step.active { border-color:#4361ee; }
+        .step.done { border-color:#2ec4b6; }
+        .step-header { display:flex; align-items:center; gap:8px; margin-bottom:12px; }
+        .step-num { display:inline-flex; width:28px; height:28px; align-items:center; justify-content:center; border-radius:50%; background:#e2e8f0; color:#4a5568; font-weight:700; font-size:13px; flex-shrink:0; }
+        .step.active .step-num { background:#4361ee; color:white; }
+        .step.done .step-num { background:#2ec4b6; color:white; }
+        .step h3 { font-size:14px; color:#4a5568; }
+        .step.active h3 { color:#4361ee; }
+        .step.done h3 { color:#2ec4b6; }
+        .step-hint { font-size:11px; color:#9ca3af; margin-top:2px; }
+
+        select, input[type=number] { width:100%; padding:8px 12px; border:1px solid #d1d5db; border-radius:8px; font-size:14px; background:white; }
+        select:focus, input:focus { outline:none; border-color:#4361ee; }
+        label { display:block; font-size:12px; font-weight:600; color:#6b7280; margin-bottom:4px; }
+        .form-row { display:flex; gap:10px; }
+        .form-row > div { flex:1; }
+
+        .btn { display:inline-flex; align-items:center; justify-content:center; padding:10px 20px; border:none; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; transition:all 0.2s; gap:6px; }
+        .btn:disabled { opacity:0.4; cursor:not-allowed; }
+        .btn-primary { background:#4361ee; color:white; }
+        .btn-primary:hover:not(:disabled) { background:#3a56d4; }
+        .btn-danger { background:#ef4444; color:white; }
+        .btn-danger:hover:not(:disabled) { background:#dc2626; }
+        .btn-sm { padding:6px 12px; font-size:12px; }
+
+        .badge { display:inline-flex; align-items:center; gap:4px; padding:4px 10px; border-radius:20px; font-size:12px; font-weight:600; }
+        .badge-success { background:#d1fae5; color:#065f46; }
+        .badge-error { background:#fee2e2; color:#991b1b; }
+        .badge-info { background:#dbeafe; color:#1e40af; }
+
+        .progress-wrap { background:#e5e7eb; border-radius:10px; height:32px; overflow:hidden; position:relative; }
+        .progress-bar { height:100%; background:linear-gradient(90deg,#4361ee,#7c3aed); border-radius:10px; transition:width 0.4s ease; display:flex; align-items:center; justify-content:center; color:white; font-size:12px; font-weight:700; min-width:40px; }
+        .progress-text { font-size:13px; color:#6b7280; margin-top:6px; }
+
+        .card { background:white; border-radius:12px; box-shadow:0 1px 3px rgba(0,0,0,0.08); overflow:hidden; }
+        .card-header { padding:16px 20px; border-bottom:1px solid #f0f0f0; display:flex; align-items:center; justify-content:space-between; }
+        .card-header h2 { font-size:16px; font-weight:700; color:#1a1a2e; }
+        table { width:100%; border-collapse:collapse; }
+        th { background:#f8fafc; padding:10px 16px; font-size:12px; font-weight:600; color:#6b7280; text-align:left; position:sticky; top:0; }
+        td { padding:10px 16px; font-size:14px; border-top:1px solid #f0f0f0; }
+        tr:hover { background:#f8fafc; }
+        .price-up { color:#ef4444; font-weight:700; }
+        .price-down { color:#22c55e; font-weight:700; }
+        .detail-link { color:#4361ee; text-decoration:none; font-weight:600; font-size:13px; }
+        .detail-link:hover { text-decoration:underline; }
+
+        .history-item { padding:12px 20px; border-top:1px solid #f0f0f0; cursor:pointer; display:flex; justify-content:space-between; align-items:center; font-size:13px; }
+        .history-item:hover { background:#f8fafc; }
+        .history-item:first-child { border-top:none; }
+
+        .toast { position:fixed; top:60px; right:20px; padding:12px 20px; border-radius:8px; font-size:14px; font-weight:500; z-index:200; animation:slideIn 0.3s ease; max-width:400px; }
+        @keyframes slideIn { from{transform:translateX(100%);opacity:0} to{transform:translateX(0);opacity:1} }
+
+        @media(max-width:768px) {
+            .steps { flex-direction:column; }
+            .form-row { flex-direction:column; }
         }
     </style>
 </head>
 <body>
-    <div class="container">
-        <div class="header">
-            <h1>🚀 Kronos Financial Prediction Web UI</h1>
-            <p>AI-based financial K-line data prediction analysis platform</p>
+    <div class="topbar">
+        <h1>Kronos A股预测系统</h1>
+        <nav>
+            <a href="/" class="active">批量扫描</a>
+            <a href="/search">单股搜索</a>
+        </nav>
+    </div>
+
+    <div class="page">
+        <!-- 新手引导 -->
+        <div class="guide-banner" id="guide-banner">
+            <div class="icon">&#128161;</div>
+            <div class="text">
+                <strong>使用指南：</strong>按照下方 3 个步骤操作 ——
+                <strong>第 1 步</strong> 加载预测模型，
+                <strong>第 2 步</strong> 选择要扫描的指数和参数，
+                <strong>第 3 步</strong> 点击开始扫描，系统会自动拉取数据并逐只预测，结果实时显示在下方排行榜中。
+                点击「Detail」可在新标签页查看该股票的 K 线预测详情。
+            </div>
+            <span class="close-btn" onclick="this.parentElement.style.display='none';localStorage.setItem('guide_closed','1')">&#10005;</span>
         </div>
 
-        <!-- Navigation -->
-        <div style="display:flex; gap:10px; margin-bottom:20px; justify-content:center;">
-            <a href="/" class="btn" style="width:auto; padding:10px 24px; text-decoration:none;">Scan & Ranking</a>
-            <a href="/search" class="btn btn-secondary" style="width:auto; padding:10px 24px; text-decoration:none;">Search Prediction</a>
-        </div>
-
-        <div class="main-content">
-            <div class="control-panel">
-                <h2>🎯 Control Panel</h2>
-
-                <!-- Model Selection -->
-                <div class="form-group">
-                    <label for="model-select">Select Model:</label>
-                    <select id="model-select">
-                        <option value="">Please load available models first</option>
-                    </select>
-                    <small class="form-text">Select the Kronos model to use</small>
+        <!-- 三步流程 -->
+        <div class="steps" id="setup-steps">
+            <!-- 第1步：加载模型 -->
+            <div class="step" id="step1">
+                <div class="step-header">
+                    <span class="step-num">1</span>
+                    <div>
+                        <h3>加载模型</h3>
+                        <div class="step-hint">选择模型和运行设备，然后点击加载</div>
+                    </div>
                 </div>
-
-                <!-- Device Selection -->
-                <div class="form-group">
-                    <label for="device-select">Select Device:</label>
-                    <select id="device-select">
-                        <option value="cpu">CPU</option>
-                        <option value="cuda">CUDA (NVIDIA GPU)</option>
-                        <option value="mps">MPS (Apple Silicon)</option>
-                    </select>
-                    <small class="form-text">Select the device to run the model on</small>
-                </div>
-
-                <!-- Model Status -->
-                <div id="model-status" class="status info" style="display: none;">
-                    Model status information
-                </div>
-
-                <!-- Load Model Button -->
-                <button id="load-model-btn" class="btn btn-secondary">
-                    🔄 Load Model
-                </button>
-
-                <hr style="margin: 20px 0; border: 1px solid #e2e8f0;">
-
-                <!-- A-Share Batch Scan Section -->
-                <h2 style="color:#4a5568; margin-bottom:15px; font-size:1.3rem;">A-Share Batch Scan</h2>
-
-                <div class="form-group">
-                    <label for="index-select">Select Index:</label>
-                    <select id="index-select">
-                        <option value="">Loading...</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label for="freq-select">Frequency:</label>
-                    <select id="freq-select">
-                        <option value="daily">Daily (日线)</option>
-                        <option value="5min">5-Minute (5分钟线)</option>
-                    </select>
-                </div>
-
-                <button id="scan-btn" class="btn btn-success" disabled>
-                    Start Batch Scan
-                </button>
-                <button id="stop-scan-btn" class="btn btn-warning" style="display:none;">
-                    Stop Scan
-                </button>
-
-                <!-- Scan Progress -->
-                <div id="scan-progress" style="display:none; margin-top:15px;">
-                    <div style="background:#e2e8f0; border-radius:8px; height:24px; overflow:hidden;">
-                        <div id="scan-progress-bar" style="background:linear-gradient(135deg,#667eea,#764ba2); height:100%; width:0%; transition:width 0.3s; border-radius:8px; display:flex; align-items:center; justify-content:center; color:white; font-size:12px; font-weight:600;">
-                            0%
+                <div>
+                    <div class="form-row">
+                        <div>
+                            <label>预测模型</label>
+                            <select id="model-select"><option value="">加载中...</option></select>
+                        </div>
+                        <div>
+                            <label>运行设备</label>
+                            <select id="device-select">
+                                <option value="cpu">CPU</option>
+                                <option value="cuda">CUDA (NVIDIA显卡)</option>
+                                <option value="mps" selected>MPS (Apple芯片)</option>
+                            </select>
                         </div>
                     </div>
-                    <p id="scan-progress-text" style="font-size:12px; color:#718096; margin-top:5px;">Preparing...</p>
-                </div>
-
-                <hr style="margin: 20px 0; border: 1px solid #e2e8f0;">
-
-                <!-- Data File Selection -->
-                <div class="form-group">
-                    <label for="data-file-select">Select Data File:</label>
-                    <select id="data-file-select">
-                        <option value="">Please load data file list first</option>
-                    </select>
-                    <small class="form-text">Select K-line data file from data directory</small>
-                </div>
-
-                <button id="load-data-btn" class="btn btn-secondary">
-                    📁 Load Data
-                </button>
-
-                <!-- Data Information Display -->
-                <div id="data-info" class="data-info" style="display: none;">
-                    <h3>📊 Data Information</h3>
-                    <p><strong>Rows:</strong> <span id="data-rows">-</span></p>
-                    <p><strong>Columns:</strong> <span id="data-cols">-</span></p>
-                    <p><strong>Time Range:</strong> <span id="data-time-range">-</span></p>
-                    <p><strong>Price Range:</strong> <span id="data-price-range">-</span></p>
-                    <p><strong>Time Frequency:</strong> <span id="data-timeframe">-</span></p>
-                    <p><strong>Prediction Columns:</strong> <span id="data-prediction-cols">-</span></p>
-                </div>
-
-                <hr style="margin: 20px 0; border: 1px solid #e2e8f0;">
-
-                <!-- Time Window Selector -->
-                <div class="time-window-container">
-                    <h3>⏰ Time Window Selection</h3>
-                    <div class="time-window-info">
-                        <span id="window-start">Start: --</span>
-                        <span id="window-end">End: --</span>
-                        <span id="window-size">Window Size: 400+120=520 data points</span>
+                    <div style="margin-top:10px; display:flex; align-items:center; gap:10px;">
+                        <button class="btn btn-primary btn-sm" id="load-model-btn" onclick="loadModel()">加载模型</button>
+                        <span id="model-status"></span>
                     </div>
-                    
-                    <div class="time-window-slider">
-                        <div class="slider-track">
-                            <div class="slider-handle start-handle" id="start-handle"></div>
-                            <div class="slider-selection" id="slider-selection"></div>
-                            <div class="slider-handle end-handle" id="end-handle"></div>
-                        </div>
-                        <div class="slider-labels">
-                            <span id="min-label">Earliest</span>
-                            <span id="max-label">Latest</span>
-                        </div>
-                    </div>
-                    
-                    <small class="form-text">Drag slider to select time window position for 520 data points, green area represents fixed 400+120 data point range</small>
-                </div>
-
-                <!-- Prediction Parameters -->
-                <div class="form-group">
-                    <label for="lookback">Lookback Window Size:</label>
-                    <input type="number" id="lookback" value="400" readonly>
-                    <small class="form-text">Fixed at 400 data points</small>
-                </div>
-
-                <div class="form-group">
-                    <label for="pred-len">Prediction Length:</label>
-                    <input type="number" id="pred-len" value="120" readonly>
-                    <small class="form-text">Fixed at 120 data points</small>
-                </div>
-
-                <!-- Prediction Quality Parameters -->
-                <div class="form-group">
-                    <label for="temperature">Prediction Temperature (T):</label>
-                    <input type="range" id="temperature" value="1.0" min="0.1" max="2.0" step="0.1">
-                    <span id="temperature-value">1.0</span>
-                    <small class="form-text">Controls prediction randomness, higher values make predictions more diverse, lower values make predictions more conservative</small>
-                </div>
-
-                <div class="form-group">
-                    <label for="top-p">Nucleus Sampling Parameter (top_p):</label>
-                    <input type="range" id="top-p" value="0.9" min="0.1" max="1.0" step="0.1">
-                    <span id="top-p-value">0.9</span>
-                    <small class="form-text">Controls prediction diversity, higher values consider broader probability distributions</small>
-                </div>
-
-                <div class="form-group">
-                    <label for="sample-count">Sample Count:</label>
-                    <input type="number" id="sample-count" value="1" min="1" max="5" step="1">
-                    <small class="form-text">Generate multiple prediction samples to improve quality (recommended 1-3)</small>
-                </div>
-
-                <button id="predict-btn" class="btn btn-success" disabled>
-                    🔮 Start Prediction
-                </button>
-
-                <!-- Loading Status -->
-                <div id="loading" class="loading">
-                    <div class="spinner"></div>
-                    <p>Processing, please wait...</p>
                 </div>
             </div>
 
-            <div class="chart-container">
-                <h2>📈 Prediction Results Chart</h2>
-                <div id="chart"></div>
-                
-                <!-- Comparison Analysis -->
-                <div id="comparison-section" class="comparison-section" style="display: none;">
-                    <h3>📊 Prediction vs Actual Data Comparison</h3>
-                    <div id="comparison-info" class="comparison-info">
-                        <p><strong>Prediction Type:</strong> <span id="prediction-type">-</span></p>
-                        <p><strong>Comparison Data:</strong> <span id="comparison-data">-</span></p>
+            <!-- 第2步：配置扫描 -->
+            <div class="step" id="step2">
+                <div class="step-header">
+                    <span class="step-num">2</span>
+                    <div>
+                        <h3>配置扫描</h3>
+                        <div class="step-hint">选择指数、频率和预测参数</div>
                     </div>
-                    
-                    <div class="error-stats">
-                        <div class="error-stat">
-                            <h4>Mean Absolute Error</h4>
-                            <div class="value" id="mae">-</div>
-                            <div class="unit">Price Units</div>
+                </div>
+                <div>
+                    <div class="form-row">
+                        <div>
+                            <label>扫描指数</label>
+                            <select id="index-select"><option value="">加载中...</option></select>
                         </div>
-                        <div class="error-stat">
-                            <h4>Root Mean Square Error</h4>
-                            <div class="value" id="rmse">-</div>
-                            <div class="unit">Price Units</div>
-                        </div>
-                        <div class="error-stat">
-                            <h4>Mean Absolute Percentage Error</h4>
-                            <div class="value" id="mape">-</div>
-                            <div class="unit">%</div>
+                        <div>
+                            <label>K线频率</label>
+                            <select id="freq-select">
+                                <option value="daily">日线</option>
+                                <option value="5min">5分钟线</option>
+                            </select>
                         </div>
                     </div>
-                    
-                    <div class="error-details">
-                        <h4>Detailed Comparison Data:</h4>
-                        <div style="max-height: 300px; overflow-y: auto;">
-                            <table class="comparison-table">
-                                <thead>
-                                    <tr>
-                                        <th>Time</th>
-                                        <th>Actual Open</th>
-                                        <th>Predicted Open</th>
-                                        <th>Actual High</th>
-                                        <th>Predicted High</th>
-                                        <th>Actual Low</th>
-                                        <th>Predicted Low</th>
-                                        <th>Actual Close</th>
-                                        <th>Predicted Close</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="comparison-tbody">
-                                </tbody>
-                            </table>
+                    <div class="form-row" style="margin-top:8px;">
+                        <div>
+                            <label>温度 (T)</label>
+                            <input type="number" id="temperature" value="1.0" step="0.1" min="0.1" max="2.0">
                         </div>
+                        <div>
+                            <label>核采样 (top_p)</label>
+                            <input type="number" id="top-p" value="0.9" step="0.1" min="0.1" max="1.0">
+                        </div>
+                        <div>
+                            <label>采样次数</label>
+                            <input type="number" id="sample-count" value="1" min="1" max="5">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 第3步：开始扫描 -->
+            <div class="step" id="step3">
+                <div class="step-header">
+                    <span class="step-num">3</span>
+                    <div>
+                        <h3>开始扫描</h3>
+                        <div class="step-hint">点击按钮，系统自动逐只预测</div>
+                    </div>
+                </div>
+                <div>
+                    <button class="btn btn-primary" id="scan-btn" disabled onclick="startScan()" style="width:100%;">开始批量扫描</button>
+                    <button class="btn btn-danger" id="stop-scan-btn" onclick="stopScan()" style="width:100%; display:none;">停止扫描</button>
+                    <div id="scan-progress" style="display:none; margin-top:10px;">
+                        <div class="progress-wrap">
+                            <div class="progress-bar" id="scan-progress-bar" style="width:0%">0%</div>
+                        </div>
+                        <div class="progress-text" id="scan-progress-text">准备中...</div>
                     </div>
                 </div>
             </div>
         </div>
 
-        <!-- Ranking Table -->
-        <div id="ranking-section" class="chart-container" style="display:none; margin-top:20px;">
-            <h2>Prediction Ranking</h2>
-            <div style="margin-bottom:10px;">
-                <select id="sort-select" style="padding:8px; border:1px solid #e2e8f0; border-radius:6px;">
-                    <option value="pred_change_pct_desc">Predicted Change (High to Low)</option>
-                    <option value="pred_change_pct_asc">Predicted Change (Low to High)</option>
-                    <option value="stock_code_asc">Stock Code (Ascending)</option>
-                </select>
+        <!-- 预测排行榜 -->
+        <div class="card" id="ranking-section" style="margin-bottom:20px;">
+            <div class="card-header">
+                <h2 id="ranking-title">预测排行榜</h2>
+                <div style="display:flex; align-items:center; gap:10px;">
+                    <span id="ranking-count" style="font-size:12px; color:#6b7280;"></span>
+                    <select id="sort-select" style="width:auto; padding:4px 8px; font-size:12px;">
+                        <option value="desc">涨幅从高到低</option>
+                        <option value="asc">涨幅从低到高</option>
+                        <option value="code">按代码排序</option>
+                    </select>
+                </div>
             </div>
-            <div style="max-height:600px; overflow-y:auto;">
-                <table class="comparison-table" id="ranking-table">
+            <div style="max-height:500px; overflow-y:auto;">
+                <table>
                     <thead>
                         <tr>
-                            <th>Rank</th>
-                            <th>Code</th>
-                            <th>Name</th>
-                            <th>Last Close</th>
-                            <th>Predicted Change</th>
-                            <th>Target Price</th>
-                            <th>Action</th>
+                            <th>排名</th>
+                            <th>代码</th>
+                            <th>名称</th>
+                            <th style="text-align:right">最新价</th>
+                            <th style="text-align:right">预测涨跌幅</th>
+                            <th style="text-align:right">预测目标价</th>
+                            <th style="text-align:center">操作</th>
                         </tr>
                     </thead>
-                    <tbody id="ranking-tbody"></tbody>
+                    <tbody id="ranking-tbody">
+                        <tr><td colspan="7" style="text-align:center; padding:40px; color:#9ca3af;">请先加载模型，然后开始扫描</td></tr>
+                    </tbody>
                 </table>
             </div>
         </div>
 
-        <!-- Scan History -->
-        <div id="history-section" class="chart-container" style="margin-top:20px;">
-            <h2>Scan History</h2>
-            <div id="history-list" style="max-height:300px; overflow-y:auto;">
-                <p style="color:#718096;">No scan history yet.</p>
+        <!-- 历史扫描记录 -->
+        <div class="card">
+            <div class="card-header">
+                <h2>历史扫描记录</h2>
+            </div>
+            <div id="history-list">
+                <div style="padding:20px; text-align:center; color:#9ca3af; font-size:13px;">暂无扫描记录</div>
             </div>
         </div>
     </div>
 
-    <script>
-        // Global variables
-        let currentDataFile = null;
-        let currentDataInfo = null;
-        let availableModels = [];
-        let modelLoaded = false;
+    <div id="toast" class="toast" style="display:none;"></div>
 
-        // Initialize after page loads
-        document.addEventListener('DOMContentLoaded', function() {
-            initializeApp();
+    <script>
+        let modelLoaded = false;
+        let scanPollingInterval = null;
+        let currentScanId = null;
+        let cachedResults = [];
+
+        // ===== 初始化 =====
+        document.addEventListener('DOMContentLoaded', async () => {
+            // 关闭引导提示（如果用户之前关过）
+            if (localStorage.getItem('guide_closed') === '1') {
+                document.getElementById('guide-banner').style.display = 'none';
+            }
+            await loadAvailableModels();
+            await loadIndexList();
+            await loadScanHistory();
+            await checkResumeScan();
+            document.getElementById('sort-select').addEventListener('change', () => renderRanking(cachedResults));
         });
 
-        // Initialize application
-        async function initializeApp() {
-            console.log('🚀 Initializing Kronos Web UI...');
-            
-            // Load available models
-            await loadAvailableModels();
-            
-            // Load data file list
-            await loadDataFiles();
-            
-            // Set up event listeners
-            setupEventListeners();
-            
-            // Initialize time slider
-            initializeTimeSlider();
-            
-            console.log('✅ Application initialization completed');
+        // ===== 提示条 =====
+        function showToast(msg, type) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.style.display = 'block';
+            t.style.background = type === 'error' ? '#fee2e2' : type === 'success' ? '#d1fae5' : '#dbeafe';
+            t.style.color = type === 'error' ? '#991b1b' : type === 'success' ? '#065f46' : '#1e40af';
+            clearTimeout(t._timer);
+            t._timer = setTimeout(() => t.style.display = 'none', 4000);
         }
 
-        // Load available models
-        async function loadAvailableModels() {
-            try {
-                const response = await axios.get('/api/available-models');
-                if (response.data.model_available) {
-                    availableModels = response.data.models;
-                    populateModelSelect();
-                    console.log('✅ Available models loaded successfully:', availableModels);
-                } else {
-                    console.warn('⚠️ Kronos model library not available');
-                    showStatus('warning', 'Kronos model library not available, will use simulated prediction');
-                }
-            } catch (error) {
-                console.error('❌ Failed to load available models:', error);
-                showStatus('error', 'Failed to load available models');
-            }
-        }
-
-        // Populate model selection dropdown
-        function populateModelSelect() {
-            const modelSelect = document.getElementById('model-select');
-            modelSelect.innerHTML = '<option value="">Please select model</option>';
-            
-            Object.entries(availableModels).forEach(([key, model]) => {
-                const option = document.createElement('option');
-                option.value = key;
-                option.textContent = `${model.name} (${model.params}) - ${model.description}`;
-                modelSelect.appendChild(option);
+        // ===== 步骤状态 =====
+        function setStep(n) {
+            [1,2,3].forEach(i => {
+                const el = document.getElementById('step' + i);
+                el.classList.remove('active', 'done');
+                if (i < n) el.classList.add('done');
+                if (i === n) el.classList.add('active');
             });
         }
 
-        // Load model
+        // ===== 模型 =====
+        async function loadAvailableModels() {
+            try {
+                const r = await axios.get('/api/available-models');
+                if (!r.data.model_available) { showToast('Kronos 模型库不可用，请检查依赖安装', 'error'); return; }
+                const sel = document.getElementById('model-select');
+                sel.innerHTML = '';
+                Object.entries(r.data.models).forEach(([key, m]) => {
+                    const opt = document.createElement('option');
+                    opt.value = key;
+                    opt.textContent = `${m.name} (${m.params})`;
+                    sel.appendChild(opt);
+                });
+            } catch(e) { showToast('加载模型列表失败', 'error'); }
+
+            // 检查模型是否已经加载（服务端重启后前端需要同步状态）
+            try {
+                const s = await axios.get('/api/model-status');
+                if (s.data.loaded) {
+                    modelLoaded = true;
+                    document.getElementById('model-status').innerHTML = '<span class="badge badge-success">已就绪 (' + s.data.current_model.device + ')</span>';
+                    document.getElementById('scan-btn').disabled = false;
+                    setStep(2);
+                }
+            } catch(e) {}
+        }
+
         async function loadModel() {
             const modelKey = document.getElementById('model-select').value;
             const device = document.getElementById('device-select').value;
-            
-            if (!modelKey) {
-                showStatus('error', 'Please select a model to load');
-                return;
-            }
-            
+            if (!modelKey) return;
+            document.getElementById('load-model-btn').disabled = true;
+            document.getElementById('model-status').innerHTML = '<span class="badge badge-info">加载中，请稍候...</span>';
             try {
-                showLoading(true);
-                document.getElementById('load-model-btn').disabled = true;
-                
-                const response = await axios.post('/api/load-model', {
-                    model_key: modelKey,
-                    device: device
-                });
-                
-                if (response.data.success) {
+                const r = await axios.post('/api/load-model', { model_key: modelKey, device });
+                if (r.data.success) {
                     modelLoaded = true;
-                    showStatus('success', response.data.message);
-                    updateModelStatus();
-                    document.getElementById('predict-btn').disabled = false;
+                    document.getElementById('model-status').innerHTML = '<span class="badge badge-success">已就绪</span>';
                     document.getElementById('scan-btn').disabled = false;
-                    console.log('✅ Model loaded successfully:', response.data.model_info);
+                    setStep(2);
+                    showToast('模型加载成功：' + r.data.model_info.name, 'success');
                 } else {
-                    showStatus('error', response.data.error);
+                    document.getElementById('model-status').innerHTML = '<span class="badge badge-error">' + r.data.error + '</span>';
                 }
-            } catch (error) {
-                console.error('❌ Model loading failed:', error);
-                showStatus('error', `Model loading failed: ${error.response?.data?.error || error.message}`);
+            } catch(e) {
+                document.getElementById('model-status').innerHTML = '<span class="badge badge-error">加载失败</span>';
+                showToast(e.response?.data?.error || '模型加载失败', 'error');
             } finally {
-                showLoading(false);
                 document.getElementById('load-model-btn').disabled = false;
             }
         }
 
-        // Update model status
-        async function updateModelStatus() {
-            try {
-                const response = await axios.get('/api/model-status');
-                const status = response.data;
-                
-                if (status.loaded) {
-                    showStatus('success', `Model loaded: ${status.current_model.name} on ${status.current_model.device}`);
-                } else if (status.available) {
-                    showStatus('info', 'Model available but not loaded');
-                } else {
-                    showStatus('warning', 'Model library not available');
-                }
-            } catch (error) {
-                console.error('❌ Failed to get model status:', error);
-            }
-        }
-
-        // Load data file list
-        async function loadDataFiles() {
-            try {
-                const response = await axios.get('/api/data-files');
-                const dataFiles = response.data;
-                
-                const dataFileSelect = document.getElementById('data-file-select');
-                dataFileSelect.innerHTML = '<option value="">Please select data file</option>';
-                
-                dataFiles.forEach(file => {
-                    const option = document.createElement('option');
-                    option.value = file.path;
-                    option.textContent = `${file.name} (${file.size})`;
-                    dataFileSelect.appendChild(option);
-                });
-                
-                console.log('✅ Data file list loaded successfully:', dataFiles);
-            } catch (error) {
-                console.error('❌ Failed to load data file list:', error);
-                showStatus('error', 'Failed to load data file list');
-            }
-        }
-
-        // Load data file
-        async function loadData() {
-            const filePath = document.getElementById('data-file-select').value;
-            
-            if (!filePath) {
-                showStatus('error', 'Please select a data file to load');
-                return;
-            }
-            
-            try {
-                showLoading(true);
-                document.getElementById('load-data-btn').disabled = true;
-                
-                const response = await axios.post('/api/load-data', {
-                    file_path: filePath
-                });
-                
-                if (response.data.success) {
-                    currentDataFile = filePath;
-                    currentDataInfo = response.data.data_info;
-                    showDataInfo(response.data.data_info);
-                    showStatus('success', response.data.message);
-                    
-                    // Update prediction button status
-                    if (modelLoaded) {
-                        document.getElementById('predict-btn').disabled = false;
-                    }
-                    
-                    console.log('✅ Data loaded successfully:', response.data.data_info);
-                } else {
-                    showStatus('error', response.data.error);
-                }
-            } catch (error) {
-                console.error('❌ Data loading failed:', error);
-                showStatus('error', `Data loading failed: ${error.response?.data?.error || error.message}`);
-            } finally {
-                showLoading(false);
-                document.getElementById('load-data-btn').disabled = false;
-            }
-        }
-
-        // Display data information
-        function showDataInfo(dataInfo) {
-            document.getElementById('data-info').style.display = 'block';
-            document.getElementById('data-rows').textContent = dataInfo.rows;
-            document.getElementById('data-cols').textContent = dataInfo.columns.length;
-            document.getElementById('data-time-range').textContent = `${dataInfo.start_date} to ${dataInfo.end_date}`;
-            document.getElementById('data-price-range').textContent = `${dataInfo.price_range.min.toFixed(4)} - ${dataInfo.price_range.max.toFixed(4)}`;
-            document.getElementById('data-timeframe').textContent = dataInfo.timeframe;
-            document.getElementById('data-prediction-cols').textContent = dataInfo.prediction_columns.join(', ');
-            
-            // Initialize time window slider
-            initializeTimeWindowSlider(dataInfo);
-        }
-
-                    // Time window slider related variables
-        let sliderData = null;
-        let isDragging = false;
-        let currentHandle = null;
-
-        // Initialize time window slider
-        function initializeTimeSlider() {
-            // Set up slider event listeners
-            setupSliderEventListeners();
-        }
-
-        // Set up slider event listeners
-        function setupSliderEventListeners() {
-            const startHandle = document.getElementById('start-handle');
-            const endHandle = document.getElementById('end-handle');
-            const track = document.querySelector('.slider-track');
-            
-            // Start dragging
-            startHandle.addEventListener('mousedown', (e) => {
-                isDragging = true;
-                currentHandle = 'start';
-                e.preventDefault();
-            });
-            
-            endHandle.addEventListener('mousedown', (e) => {
-                isDragging = true;
-                currentHandle = 'end';
-                e.preventDefault();
-            });
-            
-            // Dragging
-            document.addEventListener('mousemove', (e) => {
-                if (!isDragging) return;
-                
-                const rect = track.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const percentage = Math.max(0, Math.min(1, x / rect.width));
-                
-                if (currentHandle === 'start') {
-                    updateStartHandle(percentage);
-                } else if (currentHandle === 'end') {
-                    updateEndHandle(percentage);
-                }
-                
-                updateSliderFromHandles();
-            });
-            
-            // End dragging
-            document.addEventListener('mouseup', () => {
-                isDragging = false;
-                currentHandle = null;
-            });
-            
-            // Click track to set position directly
-            track.addEventListener('click', (e) => {
-                const rect = track.getBoundingClientRect();
-                const x = e.clientX - rect.left;
-                const percentage = Math.max(0, Math.min(1, x / rect.width));
-                
-                // Determine which handle is closer to the click position
-                const startHandle = document.getElementById('start-handle');
-                const endHandle = document.getElementById('end-handle');
-                const startRect = startHandle.getBoundingClientRect();
-                const endRect = endHandle.getBoundingClientRect();
-                
-                if (Math.abs(x - (startRect.left - rect.left)) < Math.abs(x - (endRect.left - rect.left))) {
-                    updateStartHandle(percentage);
-                } else {
-                    updateEndHandle(percentage);
-                }
-                
-                updateSliderFromHandles();
-            });
-        }
-
-        // Update start handle position
-        function updateStartHandle(percentage) {
-            const startHandle = document.getElementById('start-handle');
-            const selection = document.getElementById('slider-selection');
-            
-            // Fixed window size of 520 data points
-            const windowSize = 520;
-            const totalRows = sliderData ? sliderData.totalRows : 1000;
-            const windowPercentage = windowSize / totalRows;
-            
-            // Ensure start handle doesn't cause window to exceed data range
-            if (percentage + windowPercentage > 1) {
-                percentage = 1 - windowPercentage;
-            }
-            
-            startHandle.style.left = (percentage * 100) + '%';
-            selection.style.left = (percentage * 100) + '%';
-            selection.style.width = (windowPercentage * 100) + '%';
-            
-            // Automatically adjust end handle position to maintain fixed window size
-            const endHandle = document.getElementById('end-handle');
-            endHandle.style.left = ((percentage + windowPercentage) * 100) + '%';
-        }
-
-        // Update end handle position
-        function updateEndHandle(percentage) {
-            const endHandle = document.getElementById('end-handle');
-            const selection = document.getElementById('slider-selection');
-            
-            // Fixed window size of 520 data points
-            const windowSize = 520;
-            const totalRows = sliderData ? sliderData.totalRows : 1000;
-            const windowPercentage = windowSize / totalRows;
-            
-            // Ensure end handle doesn't cause window to exceed data range
-            if (percentage - windowPercentage < 0) {
-                percentage = windowPercentage;
-            }
-            
-            endHandle.style.left = (percentage * 100) + '%';
-            selection.style.left = ((percentage - windowPercentage) * 100) + '%';
-            selection.style.width = (windowPercentage * 100) + '%';
-            
-            // Automatically adjust start handle position to maintain fixed window size
-            const startHandle = document.getElementById('start-handle');
-            startHandle.style.left = ((percentage - windowPercentage) * 100) + '%';
-        }
-
-        // Update slider display based on handle positions
-        function updateSliderFromHandles() {
-            const startHandle = document.getElementById('start-handle');
-            const endHandle = document.getElementById('end-handle');
-            
-            const startPercentage = parseFloat(startHandle.style.left) / 100;
-            const endPercentage = parseFloat(endHandle.style.left) / 100;
-            
-            if (!sliderData) return;
-            
-            // Calculate selected time range
-            const totalTime = sliderData.endDate.getTime() - sliderData.startDate.getTime();
-            const startTime = sliderData.startDate.getTime() + (totalTime * startPercentage);
-            const endTime = sliderData.startDate.getTime() + (totalTime * endPercentage);
-            
-            const startDate = new Date(startTime);
-            const endDate = new Date(endTime);
-            
-            // Update display information
-            document.getElementById('window-start').textContent = `Start: ${startDate.toLocaleDateString()}`;
-            document.getElementById('window-end').textContent = `End: ${endDate.toLocaleDateString()}`;
-            
-            // Display fixed window size
-            document.getElementById('window-size').textContent = `Window Size: 400 + 120 = 520 data points (fixed)`;
-            
-            // Input field values remain fixed
-            document.getElementById('lookback').value = 400;
-            document.getElementById('pred-len').value = 120;
-        }
-
-        // Update slider based on input fields
-        function updateSliderFromInputs() {
-            if (!sliderData) return;
-            
-            // Fixed window size: 400 + 120 = 520 data points
-            const lookback = 400;
-            const predLen = 120;
-            const windowSize = lookback + predLen; // Fixed at 520
-            
-            // Calculate slider position
-            const totalRows = sliderData.totalRows;
-            
-            if (windowSize > totalRows) {
-                // If window size exceeds total data amount, show error
-                showStatus('error', `Insufficient data, need at least ${windowSize} data points, currently only ${totalRows} available`);
-                return;
-            }
-            
-            // Calculate slider position (default select first half of data)
-            const startPercentage = 0.1; // Start from 10%
-            const endPercentage = startPercentage + (windowSize / totalRows);
-            
-            // Update handle positions
-            updateStartHandle(startPercentage);
-            updateEndHandle(endPercentage);
-            
-            // Update display information
-            updateSliderFromHandles();
-        }
-
-        // Initialize time window slider
-        function initializeTimeWindowSlider(dataInfo) {
-            sliderData = {
-                startDate: new Date(dataInfo.start_date),
-                endDate: new Date(dataInfo.end_date),
-                totalRows: dataInfo.rows,
-                timeframe: dataInfo.timeframe
-            };
-            
-            // Set slider labels
-            document.getElementById('min-label').textContent = dataInfo.start_date.split('T')[0];
-            document.getElementById('max-label').textContent = dataInfo.end_date.split('T')[0];
-            
-            // Initialize slider position
-            updateSliderFromInputs();
-        }
-
-        // Start prediction
-        async function startPrediction() {
-            if (!currentDataFile) {
-                showStatus('error', 'Please load data file first');
-                return;
-            }
-            
-            if (!modelLoaded) {
-                showStatus('error', 'Please load model first');
-                return;
-            }
-            
-            try {
-                showLoading(true);
-                document.getElementById('predict-btn').disabled = true;
-                
-                const lookback = parseInt(document.getElementById('lookback').value);
-                const predLen = parseInt(document.getElementById('pred-len').value);
-                
-                // Get selected time range from time window slider
-                const startHandle = document.getElementById('start-handle');
-                const startPercentage = parseFloat(startHandle.style.left) / 100;
-                
-                if (!sliderData) {
-                    showStatus('error', 'Time window slider not initialized');
-                    return;
-                }
-                
-                // Calculate selected time range
-                const totalTime = sliderData.endDate.getTime() - sliderData.startDate.getTime();
-                const startTime = sliderData.startDate.getTime() + (totalTime * startPercentage);
-                const startDate = new Date(startTime);
-                
-                // Get prediction quality parameters
-                const temperature = parseFloat(document.getElementById('temperature').value);
-                const topP = parseFloat(document.getElementById('top-p').value);
-                const sampleCount = parseInt(document.getElementById('sample-count').value);
-                
-                let predictionParams = {
-                    file_path: currentDataFile,
-                    lookback: lookback,
-                    pred_len: predLen,
-                    start_date: startDate.toISOString().slice(0, 16), // Format as YYYY-MM-DDTHH:MM
-                    temperature: temperature,
-                    top_p: topP,
-                    sample_count: sampleCount
-                };
-                
-                console.log('🚀 Starting prediction, parameters:', predictionParams);
-                
-                const response = await axios.post('/api/predict', predictionParams);
-                
-                if (response.data.success) {
-                    // Display prediction results
-                    displayPredictionResult(response.data);
-                    showStatus('success', response.data.message);
-                } else {
-                    showStatus('error', response.data.error);
-                }
-            } catch (error) {
-                console.error('❌ Prediction failed:', error);
-                showStatus('error', `Prediction failed: ${error.response?.data?.error || error.message}`);
-            } finally {
-                showLoading(false);
-                document.getElementById('predict-btn').disabled = false;
-            }
-        }
-
-        // Display prediction results
-        function displayPredictionResult(result) {
-            // Display chart
-            const chartData = JSON.parse(result.chart);
-            Plotly.newPlot('chart', chartData.data, chartData.layout);
-            
-            // Display comparison analysis (if actual data exists)
-            if (result.has_comparison) {
-                displayComparisonAnalysis(result);
-            } else {
-                document.getElementById('comparison-section').style.display = 'none';
-            }
-        }
-
-        // Display comparison analysis
-        function displayComparisonAnalysis(result) {
-            document.getElementById('comparison-section').style.display = 'block';
-            
-            // Update comparison information
-            document.getElementById('prediction-type').textContent = result.prediction_type;
-            document.getElementById('comparison-data').textContent = `${result.actual_data.length} actual data points`;
-            
-            // Calculate error statistics
-            const errorStats = getPredictionQuality(result.prediction_results, result.actual_data);
-            
-            // Display error statistics
-            document.getElementById('mae').textContent = errorStats.mae.toFixed(4);
-            document.getElementById('rmse').textContent = errorStats.rmse.toFixed(4);
-            document.getElementById('mape').textContent = errorStats.mape.toFixed(2);
-            
-            // Fill comparison table
-            fillComparisonTable(result.prediction_results, result.actual_data);
-        }
-
-        // Calculate prediction quality metrics
-        function getPredictionQuality(predictions, actuals) {
-            if (!predictions || !actuals || predictions.length === 0 || actuals.length === 0) {
-                return { mae: 0, rmse: 0, mape: 0 };
-            }
-            
-            const minLen = Math.min(predictions.length, actuals.length);
-            let mae = 0, rmse = 0, mape = 0;
-            
-            for (let i = 0; i < minLen; i++) {
-                const pred = predictions[i];
-                const act = actuals[i];
-                
-                // Use closing price to calculate errors
-                const error = Math.abs(pred.close - act.close);
-                const percentError = (error / act.close) * 100;
-                
-                mae += error;
-                rmse += error * error;
-                mape += percentError;
-            }
-            
-            mae /= minLen;
-            rmse = Math.sqrt(rmse / minLen);
-            mape /= minLen;
-            
-            return { mae, rmse, mape };
-        }
-
-                    // Fill comparison table
-        function fillComparisonTable(predictions, actuals) {
-            const tbody = document.getElementById('comparison-tbody');
-            tbody.innerHTML = '';
-            
-            const minLen = Math.min(predictions.length, actuals.length);
-            
-            for (let i = 0; i < minLen; i++) {
-                const pred = predictions[i];
-                const act = actuals[i];
-                
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${new Date(pred.timestamp).toLocaleString()}</td>
-                    <td>${act.open.toFixed(4)}</td>
-                    <td>${pred.open.toFixed(4)}</td>
-                    <td>${act.high.toFixed(4)}</td>
-                    <td>${pred.high.toFixed(4)}</td>
-                    <td>${act.low.toFixed(4)}</td>
-                    <td>${pred.low.toFixed(4)}</td>
-                    <td>${act.close.toFixed(4)}</td>
-                    <td>${pred.close.toFixed(4)}</td>
-                `;
-                tbody.appendChild(row);
-            }
-        }
-
-        // Set up event listeners
-        function setupEventListeners() {
-            // Load model button
-            document.getElementById('load-model-btn').addEventListener('click', loadModel);
-            
-            // Load data button
-            document.getElementById('load-data-btn').addEventListener('click', loadData);
-            
-            // Prediction button
-            document.getElementById('predict-btn').addEventListener('click', startPrediction);
-            
-            // Prediction quality parameter sliders
-            document.getElementById('temperature').addEventListener('input', function() {
-                document.getElementById('temperature-value').textContent = this.value;
-            });
-            
-            document.getElementById('top-p').addEventListener('input', function() {
-                document.getElementById('top-p-value').textContent = this.value;
-            });
-            
-            // Update slider when lookback window size changes
-            document.getElementById('lookback').addEventListener('input', updateSliderFromInputs);
-            document.getElementById('pred-len').addEventListener('input', updateSliderFromInputs);
-        }
-
-        // Display status information
-        function showStatus(type, message) {
-            const statusDiv = document.getElementById('model-status');
-            statusDiv.className = `status ${type}`;
-            statusDiv.textContent = message;
-            statusDiv.style.display = 'block';
-            
-            // Auto-hide
-            setTimeout(() => {
-                statusDiv.style.display = 'none';
-            }, 5000);
-        }
-
-        // Show/hide loading status
-        function showLoading(show) {
-            const loadingDiv = document.getElementById('loading');
-            if (show) {
-                loadingDiv.classList.add('show');
-            } else {
-                loadingDiv.classList.remove('show');
-            }
-        }
-
-        // ===== A-Share Scan Functions =====
-        let scanPollingInterval = null;
-
+        // ===== 指数列表 =====
         async function loadIndexList() {
             try {
-                const response = await axios.get('/api/index-list');
-                const select = document.getElementById('index-select');
-                select.innerHTML = '';
-                response.data.indices.forEach(idx => {
+                const r = await axios.get('/api/index-list');
+                const sel = document.getElementById('index-select');
+                sel.innerHTML = '';
+                r.data.indices.forEach(idx => {
                     const opt = document.createElement('option');
                     opt.value = idx.code;
-                    opt.textContent = `${idx.name} (~${idx.count_approx} stocks)`;
-                    select.appendChild(opt);
+                    opt.textContent = `${idx.name} (~${idx.count_approx}只)`;
+                    sel.appendChild(opt);
                 });
-            } catch (e) {
-                console.error('Failed to load index list:', e);
-            }
+            } catch(e) {}
         }
 
+        // ===== 扫描 =====
         async function startScan() {
-            const indexCode = document.getElementById('index-select').value;
-            const freq = document.getElementById('freq-select').value;
-            const modelKey = document.getElementById('model-select').value;
-            const T = parseFloat(document.getElementById('temperature').value);
-            const topP = parseFloat(document.getElementById('top-p').value);
-            const sampleCount = parseInt(document.getElementById('sample-count').value);
-
-            if (!modelKey || !modelLoaded) {
-                showStatus('error', 'Please load a model first');
-                return;
-            }
-
+            if (!modelLoaded) { showToast('请先加载模型（第1步）', 'error'); return; }
             try {
-                const response = await axios.post('/api/scan', {
-                    index_code: indexCode, freq: freq, model_key: modelKey,
-                    T: T, top_p: topP, sample_count: sampleCount,
+                const r = await axios.post('/api/scan', {
+                    index_code: document.getElementById('index-select').value,
+                    freq: document.getElementById('freq-select').value,
+                    model_key: document.getElementById('model-select').value,
+                    T: parseFloat(document.getElementById('temperature').value),
+                    top_p: parseFloat(document.getElementById('top-p').value),
+                    sample_count: parseInt(document.getElementById('sample-count').value),
                 });
-                if (response.data.success) {
+                if (r.data.success) {
+                    currentScanId = r.data.scan_id;
                     document.getElementById('scan-btn').style.display = 'none';
                     document.getElementById('stop-scan-btn').style.display = 'block';
                     document.getElementById('scan-progress').style.display = 'block';
-                    document.getElementById('ranking-section').style.display = 'block';
-                    showStatus('success', 'Scan started: ' + response.data.scan_id);
-                    scanPollingInterval = setInterval(pollScanStatus, 2000);
+                    setStep(3);
+                    showToast('扫描已启动', 'success');
+                    startPolling();
                 }
-            } catch (e) {
-                showStatus('error', e.response?.data?.error || 'Failed to start scan');
+            } catch(e) {
+                showToast(e.response?.data?.error || '启动扫描失败', 'error');
             }
+        }
+
+        function startPolling() {
+            if (scanPollingInterval) clearInterval(scanPollingInterval);
+            scanPollingInterval = setInterval(pollScanStatus, 2000);
+            pollScanStatus();
         }
 
         async function pollScanStatus() {
             try {
-                const response = await axios.get('/api/scan/status');
-                const state = response.data;
-                if (state.status === 'idle') return;
+                const r = await axios.get('/api/scan/status');
+                const s = r.data;
+                if (s.status === 'idle') { stopPolling(); return; }
 
-                const pct = state.total > 0 ? Math.round((state.completed / state.total) * 100) : 0;
-                const bar = document.getElementById('scan-progress-bar');
-                bar.style.width = pct + '%';
-                bar.textContent = pct + '%';
-                document.getElementById('scan-progress-text').textContent =
-                    `${state.completed}/${state.total} - ${state.current_stock || 'Processing...'}`;
+                currentScanId = s.scan_id;
+                const pct = s.total > 0 ? Math.round((s.completed / s.total) * 100) : 0;
+                document.getElementById('scan-progress-bar').style.width = pct + '%';
+                document.getElementById('scan-progress-bar').textContent = pct + '%';
+                document.getElementById('scan-progress-text').textContent = `${s.completed}/${s.total} | 正在处理：${s.current_stock || '...'}`;
+                document.getElementById('ranking-count').textContent = s.completed + ' 只股票';
 
-                if (state.results) {
-                    renderRanking(state.results);
+                if (s.results && s.results.length > 0) {
+                    cachedResults = s.results;
+                    renderRanking(s.results);
                 }
 
-                if (state.status !== 'running') {
-                    clearInterval(scanPollingInterval);
-                    scanPollingInterval = null;
-                    document.getElementById('scan-btn').style.display = 'block';
-                    document.getElementById('stop-scan-btn').style.display = 'none';
-                    showStatus(state.status === 'completed' ? 'success' : 'warning',
-                        `Scan ${state.status}. ${state.completed}/${state.total} stocks processed.` +
-                        (state.errors.length > 0 ? ` ${state.errors.length} errors.` : ''));
+                if (s.status !== 'running') {
+                    stopPolling();
+                    const errMsg = s.errors && s.errors.length > 0 ? `（${s.errors.length} 个错误）` : '';
+                    const statusText = s.status === 'completed' ? '扫描完成' : s.status === 'stopped' ? '扫描已停止' : '扫描结束';
+                    showToast(`${statusText}，已处理 ${s.completed}/${s.total} 只${errMsg}`, s.status === 'completed' ? 'success' : 'info');
                     loadScanHistory();
                 }
-            } catch (e) {
-                console.error('Poll error:', e);
-            }
+            } catch(e) {}
+        }
+
+        function stopPolling() {
+            clearInterval(scanPollingInterval);
+            scanPollingInterval = null;
+            document.getElementById('scan-btn').style.display = 'block';
+            document.getElementById('stop-scan-btn').style.display = 'none';
         }
 
         async function stopScan() {
-            try {
-                await axios.post('/api/scan/stop');
-                showStatus('info', 'Stopping scan...');
-            } catch (e) {
-                showStatus('error', 'Failed to stop scan');
-            }
+            try { await axios.post('/api/scan/stop'); showToast('正在停止扫描...', 'info'); } catch(e) {}
         }
 
+        // 自动恢复：用户离开页面再回来时，自动重连正在运行的扫描
+        async function checkResumeScan() {
+            try {
+                const r = await axios.get('/api/scan/status');
+                if (r.data.status === 'running') {
+                    currentScanId = r.data.scan_id;
+                    document.getElementById('scan-btn').style.display = 'none';
+                    document.getElementById('stop-scan-btn').style.display = 'block';
+                    document.getElementById('scan-progress').style.display = 'block';
+                    setStep(3);
+                    startPolling();
+                    showToast('已自动恢复正在进行的扫描', 'info');
+                } else if (r.data.results && r.data.results.length > 0) {
+                    cachedResults = r.data.results;
+                    renderRanking(r.data.results);
+                    document.getElementById('ranking-count').textContent = r.data.results.length + ' 只股票';
+                }
+            } catch(e) {}
+        }
+
+        // ===== 排行榜 =====
         function renderRanking(results) {
-            // Cache results for re-sorting
-            document.getElementById('ranking-tbody').dataset.lastResults = JSON.stringify(results);
+            cachedResults = results;
             const sortKey = document.getElementById('sort-select').value;
             let sorted = [...results];
-            if (sortKey === 'pred_change_pct_desc') sorted.sort((a, b) => b.pred_change_pct - a.pred_change_pct);
-            else if (sortKey === 'pred_change_pct_asc') sorted.sort((a, b) => a.pred_change_pct - b.pred_change_pct);
-            else if (sortKey === 'stock_code_asc') sorted.sort((a, b) => a.stock_code.localeCompare(b.stock_code));
+            if (sortKey === 'desc') sorted.sort((a, b) => b.pred_change_pct - a.pred_change_pct);
+            else if (sortKey === 'asc') sorted.sort((a, b) => a.pred_change_pct - b.pred_change_pct);
+            else sorted.sort((a, b) => a.stock_code.localeCompare(b.stock_code));
 
             const tbody = document.getElementById('ranking-tbody');
-            tbody.innerHTML = '';
-            sorted.forEach((r, i) => {
-                const color = r.pred_change_pct >= 0 ? '#EF5350' : '#26A69A';
+            if (sorted.length === 0) {
+                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:40px; color:#9ca3af;">暂无结果</td></tr>';
+                return;
+            }
+            tbody.innerHTML = sorted.map((r, i) => {
+                const cls = r.pred_change_pct >= 0 ? 'price-up' : 'price-down';
                 const sign = r.pred_change_pct >= 0 ? '+' : '';
-                const targetPrice = r.last_close * (1 + r.pred_change_pct / 100);
-                tbody.innerHTML += `<tr>
-                    <td>${i + 1}</td>
-                    <td>${r.stock_code}</td>
+                const target = r.last_close * (1 + r.pred_change_pct / 100);
+                const freq = r.freq || 'daily';
+                return `<tr>
+                    <td>${i+1}</td>
+                    <td><strong>${r.stock_code}</strong></td>
                     <td>${r.stock_name}</td>
-                    <td>${r.last_close.toFixed(2)}</td>
-                    <td style="color:${color}; font-weight:600;">${sign}${r.pred_change_pct.toFixed(2)}%</td>
-                    <td>${targetPrice.toFixed(2)}</td>
-                    <td><a href="/stock/${r.stock_code}?freq=${r.freq}" style="color:#667eea;">Detail</a></td>
+                    <td style="text-align:right">${r.last_close.toFixed(2)}</td>
+                    <td style="text-align:right" class="${cls}">${sign}${r.pred_change_pct.toFixed(2)}%</td>
+                    <td style="text-align:right">${target.toFixed(2)}</td>
+                    <td style="text-align:center"><a href="/stock/${r.stock_code}?freq=${freq}" target="_blank" class="detail-link">查看详情</a></td>
                 </tr>`;
-            });
+            }).join('');
         }
 
+        // ===== 历史记录 =====
         async function loadScanHistory() {
             try {
-                const response = await axios.get('/api/scan/history');
+                const r = await axios.get('/api/scan/history');
                 const div = document.getElementById('history-list');
-                if (response.data.history.length === 0) {
-                    div.innerHTML = '<p style="color:#718096;">No scan history yet.</p>';
+                if (!r.data.history || r.data.history.length === 0) {
+                    div.innerHTML = '<div style="padding:20px; text-align:center; color:#9ca3af; font-size:13px;">暂无扫描记录</div>';
                     return;
                 }
-                div.innerHTML = response.data.history.map(h =>
-                    `<div style="padding:10px; border-bottom:1px solid #e2e8f0; cursor:pointer;" onclick="loadHistoryScan('${h.scan_id}')">
-                        <strong>${h.scan_id}</strong> - ${h.freq} - ${h.model_key} - ${h.total_stocks} stocks
-                        <span style="color:#718096; font-size:12px;"> ${h.started_at}</span>
-                    </div>`
-                ).join('');
-            } catch (e) {
-                console.error('Failed to load history:', e);
-            }
+                div.innerHTML = r.data.history.map(h => {
+                    const freqText = h.freq === 'daily' ? '日线' : '5分钟线';
+                    const timeStr = h.started_at ? new Date(h.started_at).toLocaleString('zh-CN') : '';
+                    return `<div class="history-item" onclick="loadHistoryScan('${h.scan_id}')">
+                        <div>
+                            <strong>${timeStr}</strong>
+                            <span style="color:#6b7280; margin-left:8px;">${freqText} | ${h.model_key} | ${h.total_stocks} 只股票</span>
+                        </div>
+                        <span style="color:#4361ee; font-size:12px;">查看结果 &rarr;</span>
+                    </div>`;
+                }).join('');
+            } catch(e) {}
         }
 
         async function loadHistoryScan(scanId) {
             try {
-                const response = await axios.get(`/api/scan/${scanId}/results?page_size=1000`);
-                document.getElementById('ranking-section').style.display = 'block';
-                renderRanking(response.data.results);
-            } catch (e) {
-                showStatus('error', 'Failed to load scan results');
-            }
+                const r = await axios.get(`/api/scan/${scanId}/results?page_size=1000`);
+                cachedResults = r.data.results;
+                renderRanking(r.data.results);
+                document.getElementById('ranking-count').textContent = r.data.results.length + ' 只股票';
+                document.getElementById('ranking-title').textContent = '历史扫描结果';
+                showToast('已加载 ' + r.data.results.length + ' 条结果', 'success');
+                // 滚动到排行榜
+                document.getElementById('ranking-section').scrollIntoView({ behavior: 'smooth' });
+            } catch(e) { showToast('加载历史结果失败', 'error'); }
         }
 
-        // Wire up scan buttons and init on load
-        document.addEventListener('DOMContentLoaded', function() {
-            loadIndexList();
-            loadScanHistory();
-            document.getElementById('scan-btn').addEventListener('click', startScan);
-            document.getElementById('stop-scan-btn').addEventListener('click', stopScan);
-            document.getElementById('sort-select').addEventListener('change', () => {
-                const tbody = document.getElementById('ranking-tbody');
-                if (tbody.dataset.lastResults) {
-                    renderRanking(JSON.parse(tbody.dataset.lastResults));
-                }
-            });
-        });
+        // 初始化步骤状态
+        setStep(1);
     </script>
 </body>
 </html>
