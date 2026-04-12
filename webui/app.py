@@ -11,6 +11,10 @@ import warnings
 import datetime
 warnings.filterwarnings('ignore')
 
+from db import Database
+from data_provider import DataProvider
+from scanner import ScanTask, FREQ_DEFAULTS
+
 # Add project root directory to path
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -28,6 +32,21 @@ CORS(app)
 tokenizer = None
 model = None
 predictor = None
+
+# A-share modules (lazy initialized)
+database = None
+data_provider = None
+current_scan = None  # Active ScanTask instance
+
+
+def get_db():
+    """Lazy-init database and data provider."""
+    global database, data_provider
+    if database is None:
+        database = Database()
+        data_provider = DataProvider(database)
+    return database, data_provider
+
 
 # Available model configurations
 AVAILABLE_MODELS = {
@@ -627,7 +646,11 @@ def predict():
 def load_model():
     """Load Kronos model"""
     global tokenizer, model, predictor
-    
+
+    # Block model switching during scan
+    if current_scan and current_scan.get_state()["status"] == "running":
+        return jsonify({'error': 'Cannot switch model while a scan is running'}), 400
+
     try:
         if not MODEL_AVAILABLE:
             return jsonify({'error': 'Kronos model library not available'}), 400
@@ -696,6 +719,187 @@ def get_model_status():
             'loaded': False,
             'message': 'Kronos model library not available, please install related dependencies'
         })
+
+# ==================== A-Share Scan API ====================
+
+@app.route('/api/index-list')
+def get_index_list():
+    """Get available index list with constituent counts."""
+    _, dp = get_db()
+    indices = dp.get_index_list()
+    return jsonify({'indices': indices})
+
+
+@app.route('/api/scan', methods=['POST'])
+def start_scan():
+    """Start batch scan."""
+    global current_scan
+    if current_scan and current_scan.get_state()["status"] == "running":
+        return jsonify({'error': 'A scan is already running'}), 400
+    if predictor is None:
+        return jsonify({'error': 'Model not loaded. Please load a model first.'}), 400
+
+    data = request.get_json()
+    index_code = data.get('index_code', '000300')
+    freq = data.get('freq', 'daily')
+    model_key = data.get('model_key', 'kronos-small')
+    params_override = {}
+    for key in ['T', 'top_p', 'sample_count', 'lookback', 'pred_len']:
+        if key in data:
+            params_override[key] = float(data[key]) if key in ('T', 'top_p') else int(data[key])
+
+    db, dp = get_db()
+    current_scan = ScanTask(db, dp, predictor, index_code, freq, model_key, params_override)
+    current_scan.start()
+    return jsonify({'success': True, 'scan_id': current_scan.scan_id, 'message': 'Scan started'})
+
+
+@app.route('/api/scan/status')
+def scan_status():
+    """Get scan progress with lightweight results (no pred_data)."""
+    if current_scan is None:
+        return jsonify({'status': 'idle', 'message': 'No scan running'})
+    state = current_scan.get_state()
+    if state["completed"] > 0:
+        db, _ = get_db()
+        results = db.get_scan_results_summary(state["scan_id"], page=1, page_size=1000)
+        state["results"] = results
+    return jsonify(state)
+
+
+@app.route('/api/scan/stop', methods=['POST'])
+def stop_scan():
+    """Stop running scan."""
+    if current_scan is None or current_scan.get_state()["status"] != "running":
+        return jsonify({'error': 'No scan running'}), 400
+    current_scan.stop()
+    return jsonify({'success': True, 'message': 'Scan stop requested'})
+
+
+@app.route('/api/scan/history')
+def scan_history():
+    """List historical scans."""
+    page = int(request.args.get('page', 1))
+    page_size = int(request.args.get('page_size', 50))
+    db, _ = get_db()
+    history = db.get_scan_history(page, page_size)
+    return jsonify({'history': history})
+
+
+@app.route('/api/scan/<scan_id>/results')
+def scan_results(scan_id):
+    """Get results for a specific scan."""
+    page = int(request.args.get('page', 1))
+    page_size = int(request.args.get('page_size', 50))
+    db, _ = get_db()
+    results = db.get_scan_results(scan_id, page, page_size)
+    total = db.get_scan_results_count(scan_id)
+    return jsonify({'results': results, 'total': total, 'page': page, 'page_size': page_size})
+
+
+@app.route('/api/predict-symbol', methods=['POST'])
+def predict_symbol():
+    """Predict a single stock by code."""
+    if predictor is None:
+        return jsonify({'error': 'Model not loaded'}), 400
+
+    data = request.get_json()
+    stock_code = data.get('stock_code', '').strip()
+    freq = data.get('freq', 'daily')
+
+    if not stock_code:
+        return jsonify({'error': 'stock_code is required'}), 400
+
+    params = FREQ_DEFAULTS.get(freq, FREQ_DEFAULTS["daily"]).copy()
+    for key in ['T', 'top_p', 'sample_count']:
+        if key in data:
+            params[key] = float(data[key]) if key in ('T', 'top_p') else int(data[key])
+
+    try:
+        _, dp = get_db()
+        kline_df = dp.fetch_kline(stock_code, freq)
+        if kline_df is None or len(kline_df) < params["lookback"]:
+            return jsonify({'error': f'Insufficient data for {stock_code}'}), 400
+
+        lookback = params["lookback"]
+        pred_len = params["pred_len"]
+        x_df = kline_df.iloc[-lookback:][["open", "high", "low", "close", "volume", "amount"]]
+        x_ts = pd.Series(kline_df.iloc[-lookback:]["dt"].values)
+
+        if freq == "daily":
+            y_ts = pd.Series(pd.bdate_range(
+                start=kline_df["dt"].iloc[-1] + pd.Timedelta(days=1), periods=pred_len
+            ))
+        else:
+            last_dt = kline_df["dt"].iloc[-1]
+            td = kline_df["dt"].iloc[-1] - kline_df["dt"].iloc[-2] if len(kline_df) > 1 else pd.Timedelta(minutes=5)
+            y_ts = pd.Series(pd.date_range(start=last_dt + td, periods=pred_len, freq=td))
+
+        pred_df = predictor.predict(
+            df=x_df, x_timestamp=x_ts, y_timestamp=y_ts,
+            pred_len=pred_len, T=params["T"], top_p=params["top_p"],
+            sample_count=params["sample_count"],
+        )
+
+        last_close = float(kline_df.iloc[-1]["close"])
+        pred_df = DataProvider.apply_price_limits(pred_df, last_close)
+
+        pred_close = float(pred_df.iloc[-1]["close"])
+        pred_change_pct = ((pred_close - last_close) / last_close) * 100
+
+        hist_data = kline_df.iloc[-lookback:].to_dict(orient="records")
+        for row in hist_data:
+            row["dt"] = str(row["dt"])
+        pred_data = pred_df.reset_index(drop=True).to_dict(orient="records")
+        pred_timestamps = [str(t) for t in y_ts]
+
+        db, _ = get_db()
+        stock_name = db.get_stock_name(stock_code)
+
+        return jsonify({
+            'success': True,
+            'stock_code': stock_code,
+            'stock_name': stock_name,
+            'freq': freq,
+            'last_close': last_close,
+            'pred_close': pred_close,
+            'pred_change_pct': round(pred_change_pct, 4),
+            'historical': hist_data,
+            'predictions': pred_data,
+            'pred_timestamps': pred_timestamps,
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
+
+
+@app.route('/api/search-stock')
+def search_stock():
+    """Search stock by code or name in cached constituents."""
+    query = request.args.get('q', '').strip()
+    if not query:
+        return jsonify({'results': []})
+    db, _ = get_db()
+    results = db.search_stocks(query)
+    return jsonify({'results': results})
+
+
+# ==================== A-Share Page Routes ====================
+
+@app.route('/stock/<symbol>')
+def stock_detail(symbol):
+    """Stock detail page."""
+    freq = request.args.get('freq', 'daily')
+    db, _ = get_db()
+    prediction = db.get_latest_prediction(symbol, freq)
+    return render_template('stock_detail.html', symbol=symbol, freq=freq, prediction=prediction)
+
+
+@app.route('/search')
+def search_page():
+    """Search prediction page."""
+    return render_template('search.html')
+
 
 if __name__ == '__main__':
     print("Starting Kronos Web UI...")
