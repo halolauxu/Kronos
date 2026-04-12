@@ -6,17 +6,44 @@ import torch
 import torch.distributed as dist
 
 
+# ==================== Device Detection ====================
+
+def get_device():
+    """Auto-detect best available device: CUDA > MPS > CPU."""
+    if torch.cuda.is_available():
+        return torch.device("cuda:0")
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
+def is_distributed():
+    """Check if running in distributed mode (launched via torchrun)."""
+    return "WORLD_SIZE" in os.environ and int(os.environ.get("WORLD_SIZE", "1")) > 1
+
+
+def setup_training(seed=42):
+    """Setup training environment. Returns (device, rank, world_size, is_ddp).
+
+    If launched with torchrun: initializes DDP, returns CUDA device.
+    Otherwise: returns best available single device (MPS/CPU).
+    """
+    if is_distributed():
+        rank, world_size, local_rank = setup_ddp()
+        device = torch.device(f"cuda:{local_rank}")
+        set_seed(seed, rank)
+        return device, rank, world_size, True
+    else:
+        device = get_device()
+        set_seed(seed, 0)
+        print(f"[Single Device] Using {device}")
+        return device, 0, 1, False
+
+
+# ==================== DDP (kept for multi-GPU compatibility) ====================
+
 def setup_ddp():
-    """
-    Initializes the distributed data parallel environment.
-
-    This function relies on environment variables set by `torchrun` or a similar
-    launcher. It initializes the process group and sets the CUDA device for the
-    current process.
-
-    Returns:
-        tuple: A tuple containing (rank, world_size, local_rank).
-    """
+    """Initializes the distributed data parallel environment."""
     if not dist.is_available():
         raise RuntimeError("torch.distributed is not available.")
 
@@ -38,81 +65,42 @@ def cleanup_ddp():
         dist.destroy_process_group()
 
 
-def set_seed(seed: int, rank: int = 0):
-    """
-    Sets the random seed for reproducibility across all relevant libraries.
+# ==================== Utilities ====================
 
-    Args:
-        seed (int): The base seed value.
-        rank (int): The process rank, used to ensure different processes have
-                    different seeds, which can be important for data loading.
-    """
+def set_seed(seed: int, rank: int = 0):
+    """Sets the random seed for reproducibility."""
     actual_seed = seed + rank
     random.seed(actual_seed)
     np.random.seed(actual_seed)
     torch.manual_seed(actual_seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(actual_seed)
-        # The two lines below can impact performance, so they are often
-        # reserved for final experiments where reproducibility is critical.
         torch.backends.cudnn.deterministic = True
         torch.backends.cudnn.benchmark = False
 
 
 def get_model_size(model: torch.nn.Module) -> str:
-    """
-    Calculates the number of trainable parameters in a PyTorch model and returns
-    it as a human-readable string.
-
-    Args:
-        model (torch.nn.Module): The PyTorch model.
-
-    Returns:
-        str: A string representing the model size (e.g., "175.0B", "7.1M", "50.5K").
-    """
+    """Returns human-readable trainable parameter count."""
     total_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
-
     if total_params >= 1e9:
-        return f"{total_params / 1e9:.1f}B"  # Billions
+        return f"{total_params / 1e9:.1f}B"
     elif total_params >= 1e6:
-        return f"{total_params / 1e6:.1f}M"  # Millions
+        return f"{total_params / 1e6:.1f}M"
     else:
-        return f"{total_params / 1e3:.1f}K"  # Thousands
+        return f"{total_params / 1e3:.1f}K"
 
 
 def reduce_tensor(tensor: torch.Tensor, world_size: int, op=dist.ReduceOp.SUM) -> torch.Tensor:
-    """
-    Reduces a tensor's value across all processes in a distributed setup.
-
-    Args:
-        tensor (torch.Tensor): The tensor to be reduced.
-        world_size (int): The total number of processes.
-        op (dist.ReduceOp, optional): The reduction operation (SUM, AVG, etc.).
-                                      Defaults to dist.ReduceOp.SUM.
-
-    Returns:
-        torch.Tensor: The reduced tensor, which will be identical on all processes.
-    """
+    """Reduces a tensor across all processes (DDP only)."""
+    if not is_distributed():
+        return tensor
     rt = tensor.clone()
     dist.all_reduce(rt, op=op)
-    # Note: `dist.ReduceOp.AVG` is available in newer torch versions.
-    # For compatibility, manual division is sometimes used after a SUM.
     if op == dist.ReduceOp.AVG:
         rt /= world_size
     return rt
 
 
 def format_time(seconds: float) -> str:
-    """
-    Formats a duration in seconds into a human-readable H:M:S string.
-
-    Args:
-        seconds (float): The total seconds.
-
-    Returns:
-        str: The formatted time string (e.g., "0:15:32").
-    """
+    """Formats seconds into H:M:S string."""
     return str(datetime.timedelta(seconds=int(seconds)))
-
-
-
