@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kronos - {{ symbol }} Detail</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); min-height:100vh; color:#333; }
+        .container { max-width:1400px; margin:0 auto; padding:20px; }
+        .header { text-align:center; margin-bottom:20px; color:white; }
+        .header h1 { font-size:2rem; margin-bottom:5px; }
+        .card { background:white; border-radius:15px; padding:25px; box-shadow:0 10px 30px rgba(0,0,0,0.2); margin-bottom:20px; }
+        .stock-info { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:15px; }
+        .info-item { text-align:center; }
+        .info-item .label { font-size:12px; color:#718096; }
+        .info-item .value { font-size:1.5rem; font-weight:600; }
+        .btn { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:none; padding:10px 20px; border-radius:8px; font-size:14px; font-weight:600; cursor:pointer; }
+        .btn:hover { transform:translateY(-2px); box-shadow:0 5px 15px rgba(0,0,0,0.2); }
+        .btn-secondary { background:linear-gradient(135deg,#718096 0%,#4a5568 100%); }
+        #chart { width:100%; height:500px; }
+        .pred-table { width:100%; border-collapse:collapse; margin-top:15px; }
+        .pred-table th, .pred-table td { border:1px solid #e2e8f0; padding:8px; text-align:center; font-size:12px; }
+        .pred-table th { background:#f7fafc; font-weight:600; }
+        nav { display:flex; gap:10px; justify-content:center; margin-bottom:20px; }
+        nav a { color:white; text-decoration:none; padding:8px 16px; border:1px solid rgba(255,255,255,0.3); border-radius:8px; }
+        nav a:hover { background:rgba(255,255,255,0.1); }
+        .spinner { border:4px solid #f3f3f3; border-top:4px solid #667eea; border-radius:50%; width:40px; height:40px; animation:spin 1s linear infinite; margin:20px auto; }
+        @keyframes spin { 0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);} }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>{{ symbol }} Stock Prediction</h1>
+        </div>
+        <nav>
+            <a href="/">Back to Scan</a>
+            <a href="/search">Search</a>
+        </nav>
+
+        <div class="card">
+            <div class="stock-info" id="stock-info">
+                <div class="info-item"><div class="label">Code</div><div class="value">{{ symbol }}</div></div>
+                <div class="info-item"><div class="label">Frequency</div><div class="value" id="info-freq">{{ freq }}</div></div>
+                <div class="info-item"><div class="label">Last Close</div><div class="value" id="info-last-close">-</div></div>
+                <div class="info-item"><div class="label">Predicted Change</div><div class="value" id="info-change">-</div></div>
+                <div class="info-item"><div class="label">Target Price</div><div class="value" id="info-target">-</div></div>
+            </div>
+        </div>
+
+        <div class="card">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                <h2 style="color:#4a5568;">K-Line Chart</h2>
+                <button class="btn" id="repredict-btn" onclick="repredict()">Re-Predict</button>
+            </div>
+            <div id="loading" style="display:none;"><div class="spinner"></div><p style="text-align:center;">Predicting...</p></div>
+            <div id="chart"></div>
+        </div>
+
+        <div class="card" id="pred-detail" style="display:none;">
+            <h2 style="color:#4a5568; margin-bottom:15px;">Prediction Detail</h2>
+            <div style="max-height:400px; overflow-y:auto;">
+                <table class="pred-table">
+                    <thead><tr><th>Date</th><th>Open</th><th>High</th><th>Low</th><th>Close</th></tr></thead>
+                    <tbody id="pred-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const symbol = "{{ symbol }}";
+        const freq = "{{ freq }}";
+
+        document.addEventListener('DOMContentLoaded', loadPrediction);
+
+        async function loadPrediction() {
+            document.getElementById('loading').style.display = 'block';
+            try {
+                const response = await axios.post('/api/predict-symbol', {
+                    stock_code: symbol, freq: freq, sample_count: 3
+                });
+                if (response.data.success) {
+                    renderResult(response.data);
+                }
+            } catch (e) {
+                alert('Prediction failed: ' + (e.response?.data?.error || e.message));
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function renderResult(data) {
+            document.getElementById('info-last-close').textContent = data.last_close.toFixed(2);
+            const changePct = data.pred_change_pct;
+            const changeEl = document.getElementById('info-change');
+            changeEl.textContent = (changePct >= 0 ? '+' : '') + changePct.toFixed(2) + '%';
+            changeEl.style.color = changePct >= 0 ? '#EF5350' : '#26A69A';
+            document.getElementById('info-target').textContent = data.pred_close.toFixed(2);
+
+            const hist = data.historical;
+            const preds = data.predictions;
+            const predTs = data.pred_timestamps;
+
+            const histTrace = {
+                x: hist.map(r => r.dt), open: hist.map(r => r.open),
+                high: hist.map(r => r.high), low: hist.map(r => r.low), close: hist.map(r => r.close),
+                type: 'candlestick', name: 'Historical',
+                increasing: {line: {color: '#EF5350'}}, decreasing: {line: {color: '#26A69A'}},
+            };
+            const predTrace = {
+                x: predTs, open: preds.map(r => r.open),
+                high: preds.map(r => r.high), low: preds.map(r => r.low), close: preds.map(r => r.close),
+                type: 'candlestick', name: 'Predicted',
+                increasing: {line: {color: '#FF7043'}}, decreasing: {line: {color: '#66BB6A'}},
+            };
+            Plotly.newPlot('chart', [histTrace, predTrace], {
+                title: symbol + ' - ' + freq,
+                xaxis: {title: 'Date', rangeslider: {visible: false}},
+                yaxis: {title: 'Price'},
+                template: 'plotly_white', height: 500,
+            });
+
+            const tbody = document.getElementById('pred-tbody');
+            tbody.innerHTML = '';
+            preds.forEach((p, i) => {
+                tbody.innerHTML += '<tr>' +
+                    '<td>' + predTs[i] + '</td>' +
+                    '<td>' + p.open.toFixed(2) + '</td><td>' + p.high.toFixed(2) + '</td>' +
+                    '<td>' + p.low.toFixed(2) + '</td><td>' + p.close.toFixed(2) + '</td>' +
+                    '</tr>';
+            });
+            document.getElementById('pred-detail').style.display = 'block';
+        }
+
+        async function repredict() {
+            await loadPrediction();
+        }
+    </script>
+</body>
+</html>

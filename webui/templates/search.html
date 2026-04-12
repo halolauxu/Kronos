@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kronos - Search Stock</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { font-family:'Segoe UI',Tahoma,Geneva,Verdana,sans-serif; background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); min-height:100vh; color:#333; }
+        .container { max-width:1200px; margin:0 auto; padding:20px; }
+        .header { text-align:center; margin-bottom:20px; color:white; }
+        .header h1 { font-size:2rem; margin-bottom:5px; }
+        .card { background:white; border-radius:15px; padding:25px; box-shadow:0 10px 30px rgba(0,0,0,0.2); margin-bottom:20px; }
+        .search-bar { display:flex; gap:10px; margin-bottom:15px; }
+        .search-bar input { flex:1; padding:12px; border:2px solid #e2e8f0; border-radius:8px; font-size:16px; }
+        .search-bar input:focus { outline:none; border-color:#667eea; }
+        .search-bar select { padding:12px; border:2px solid #e2e8f0; border-radius:8px; font-size:14px; }
+        .btn { background:linear-gradient(135deg,#667eea 0%,#764ba2 100%); color:white; border:none; padding:12px 24px; border-radius:8px; font-size:16px; font-weight:600; cursor:pointer; }
+        .btn:hover { transform:translateY(-2px); box-shadow:0 5px 15px rgba(0,0,0,0.2); }
+        .btn:disabled { opacity:0.6; cursor:not-allowed; }
+        .suggestions { border:1px solid #e2e8f0; border-radius:8px; max-height:200px; overflow-y:auto; display:none; }
+        .suggestion-item { padding:10px 15px; cursor:pointer; border-bottom:1px solid #f0f0f0; }
+        .suggestion-item:hover { background:#f7fafc; }
+        #chart { width:100%; height:500px; }
+        .info-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:10px; margin-bottom:15px; }
+        .info-item { text-align:center; padding:10px; background:#f7fafc; border-radius:8px; }
+        .info-item .label { font-size:11px; color:#718096; }
+        .info-item .value { font-size:1.3rem; font-weight:600; }
+        nav { display:flex; gap:10px; justify-content:center; margin-bottom:20px; }
+        nav a { color:white; text-decoration:none; padding:8px 16px; border:1px solid rgba(255,255,255,0.3); border-radius:8px; }
+        nav a:hover { background:rgba(255,255,255,0.1); }
+        .spinner { border:4px solid #f3f3f3; border-top:4px solid #667eea; border-radius:50%; width:40px; height:40px; animation:spin 1s linear infinite; margin:20px auto; }
+        @keyframes spin { 0%{transform:rotate(0deg);} 100%{transform:rotate(360deg);} }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>Search & Predict</h1>
+            <p style="opacity:0.9;">Enter a stock code to predict</p>
+        </div>
+        <nav>
+            <a href="/">Back to Scan</a>
+            <a href="/search">Search</a>
+        </nav>
+
+        <div class="card">
+            <div class="search-bar">
+                <input type="text" id="search-input" placeholder="Enter stock code, e.g. 000001, 600519">
+                <select id="search-freq">
+                    <option value="daily">Daily</option>
+                    <option value="5min">5-Min</option>
+                </select>
+                <button class="btn" id="search-btn" onclick="searchAndPredict()">Predict</button>
+            </div>
+            <div class="suggestions" id="suggestions"></div>
+        </div>
+
+        <!-- Recent Searches -->
+        <div class="card" id="recent-card">
+            <h3 style="color:#4a5568; margin-bottom:10px;">Recent Searches</h3>
+            <div id="recent-list" style="color:#718096;">No recent searches.</div>
+        </div>
+
+        <div id="loading" style="display:none;"><div class="spinner"></div><p style="text-align:center; color:white;">Fetching data and predicting...</p></div>
+
+        <div class="card" id="result-card" style="display:none;">
+            <div class="info-grid" id="result-info"></div>
+            <div id="chart"></div>
+        </div>
+    </div>
+
+    <script>
+        let searchTimeout = null;
+        const input = document.getElementById('search-input');
+
+        // Recent searches (localStorage)
+        function getRecentSearches() {
+            try { return JSON.parse(localStorage.getItem('kronos_recent_searches') || '[]'); } catch(e) { return []; }
+        }
+        function addRecentSearch(code) {
+            let recent = getRecentSearches().filter(c => c !== code);
+            recent.unshift(code);
+            if (recent.length > 10) recent = recent.slice(0, 10);
+            localStorage.setItem('kronos_recent_searches', JSON.stringify(recent));
+            renderRecentSearches();
+        }
+        function renderRecentSearches() {
+            const recent = getRecentSearches();
+            const div = document.getElementById('recent-list');
+            if (recent.length === 0) { div.innerHTML = 'No recent searches.'; return; }
+            div.innerHTML = recent.map(c =>
+                '<span style="display:inline-block; padding:5px 12px; margin:3px; background:#f7fafc; border:1px solid #e2e8f0; border-radius:6px; cursor:pointer;" onclick="selectStock(\'' + c + '\')">' + c + '</span>'
+            ).join('');
+        }
+        document.addEventListener('DOMContentLoaded', renderRecentSearches);
+
+        input.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            const q = this.value.trim();
+            if (q.length < 1) { document.getElementById('suggestions').style.display = 'none'; return; }
+            searchTimeout = setTimeout(function() { fetchSuggestions(q); }, 300);
+        });
+
+        input.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') searchAndPredict();
+        });
+
+        async function fetchSuggestions(q) {
+            try {
+                const response = await axios.get('/api/search-stock?q=' + encodeURIComponent(q));
+                const div = document.getElementById('suggestions');
+                if (response.data.results.length === 0) { div.style.display = 'none'; return; }
+                div.innerHTML = response.data.results.map(r =>
+                    '<div class="suggestion-item" onclick="selectStock(\'' + r.stock_code + '\')">' + r.stock_code + ' - ' + r.stock_name + '</div>'
+                ).join('');
+                div.style.display = 'block';
+            } catch (e) { /* ignore */ }
+        }
+
+        function selectStock(code) {
+            input.value = code;
+            document.getElementById('suggestions').style.display = 'none';
+        }
+
+        async function searchAndPredict() {
+            const code = input.value.trim();
+            const freq = document.getElementById('search-freq').value;
+            if (!code) return;
+
+            addRecentSearch(code);
+            document.getElementById('suggestions').style.display = 'none';
+            document.getElementById('loading').style.display = 'block';
+            document.getElementById('result-card').style.display = 'none';
+
+            try {
+                const response = await axios.post('/api/predict-symbol', {
+                    stock_code: code, freq: freq, sample_count: 3,
+                });
+                if (response.data.success) {
+                    renderSearchResult(response.data);
+                }
+            } catch (e) {
+                alert('Failed: ' + (e.response?.data?.error || e.message));
+            } finally {
+                document.getElementById('loading').style.display = 'none';
+            }
+        }
+
+        function renderSearchResult(data) {
+            const changePct = data.pred_change_pct;
+            const color = changePct >= 0 ? '#EF5350' : '#26A69A';
+            const sign = changePct >= 0 ? '+' : '';
+
+            document.getElementById('result-info').innerHTML =
+                '<div class="info-item"><div class="label">Code</div><div class="value">' + data.stock_code + '</div></div>' +
+                '<div class="info-item"><div class="label">Last Close</div><div class="value">' + data.last_close.toFixed(2) + '</div></div>' +
+                '<div class="info-item"><div class="label">Predicted Change</div><div class="value" style="color:' + color + '">' + sign + changePct.toFixed(2) + '%</div></div>' +
+                '<div class="info-item"><div class="label">Target Price</div><div class="value">' + data.pred_close.toFixed(2) + '</div></div>';
+
+            const hist = data.historical;
+            const preds = data.predictions;
+            const predTs = data.pred_timestamps;
+
+            Plotly.newPlot('chart', [
+                { x: hist.map(r => r.dt), open: hist.map(r => r.open), high: hist.map(r => r.high),
+                  low: hist.map(r => r.low), close: hist.map(r => r.close),
+                  type: 'candlestick', name: 'Historical',
+                  increasing: {line: {color: '#EF5350'}}, decreasing: {line: {color: '#26A69A'}} },
+                { x: predTs, open: preds.map(r => r.open), high: preds.map(r => r.high),
+                  low: preds.map(r => r.low), close: preds.map(r => r.close),
+                  type: 'candlestick', name: 'Predicted',
+                  increasing: {line: {color: '#FF7043'}}, decreasing: {line: {color: '#66BB6A'}} },
+            ], {
+                title: data.stock_code + ' - ' + data.freq,
+                xaxis: { title: 'Date', rangeslider: {visible: false} },
+                yaxis: { title: 'Price' },
+                template: 'plotly_white', height: 500,
+            });
+
+            document.getElementById('result-card').style.display = 'block';
+        }
+    </script>
+</body>
+</html>
