@@ -12,7 +12,7 @@ import datetime
 warnings.filterwarnings('ignore')
 
 from db import Database
-from data_provider import DataProvider
+from data_provider import DataProvider, generate_ashare_timestamps
 from scanner import ScanTask, FREQ_DEFAULTS
 
 # Add project root directory to path
@@ -826,14 +826,7 @@ def predict_symbol():
         x_df = kline_df.iloc[-lookback:][["open", "high", "low", "close", "volume", "amount"]]
         x_ts = pd.Series(kline_df.iloc[-lookback:]["dt"].values)
 
-        if freq == "daily":
-            y_ts = pd.Series(pd.bdate_range(
-                start=kline_df["dt"].iloc[-1] + pd.Timedelta(days=1), periods=pred_len
-            ))
-        else:
-            last_dt = kline_df["dt"].iloc[-1]
-            td = kline_df["dt"].iloc[-1] - kline_df["dt"].iloc[-2] if len(kline_df) > 1 else pd.Timedelta(minutes=5)
-            y_ts = pd.Series(pd.date_range(start=last_dt + td, periods=pred_len, freq=td))
+        y_ts = generate_ashare_timestamps(kline_df["dt"].iloc[-1], freq, pred_len)
 
         pred_df = predictor.predict(
             df=x_df, x_timestamp=x_ts, y_timestamp=y_ts,
@@ -873,6 +866,113 @@ def predict_symbol():
         return jsonify({'error': f'Prediction failed: {str(e)}'}), 500
 
 
+@app.route('/api/backtest-symbol', methods=['POST'])
+def backtest_symbol():
+    """Backtest: predict a past period and compare with actual data."""
+    if predictor is None:
+        return jsonify({'error': 'Model not loaded'}), 400
+
+    data = request.get_json()
+    stock_code = data.get('stock_code', '').strip()
+    freq = data.get('freq', 'daily')
+
+    if not stock_code:
+        return jsonify({'error': 'stock_code is required'}), 400
+
+    params = FREQ_DEFAULTS.get(freq, FREQ_DEFAULTS["daily"]).copy()
+    for key in ['T', 'top_p', 'sample_count']:
+        if key in data:
+            params[key] = float(data[key]) if key in ('T', 'top_p') else int(data[key])
+
+    try:
+        _, dp = get_db()
+        kline_df = dp.fetch_kline(stock_code, freq)
+        lookback = params["lookback"]
+        pred_len = params["pred_len"]
+
+        if kline_df is None or len(kline_df) < lookback + pred_len:
+            return jsonify({'error': f'Insufficient data for backtest (need {lookback + pred_len}, have {len(kline_df) if kline_df is not None else 0})'}), 400
+
+        # Use data up to pred_len bars ago as input, predict pred_len bars, compare with actual
+        split_idx = len(kline_df) - pred_len
+        hist_df = kline_df.iloc[:split_idx]
+        actual_df = kline_df.iloc[split_idx:]
+
+        x_df = hist_df.iloc[-lookback:][["open", "high", "low", "close", "volume", "amount"]]
+        x_ts = pd.Series(hist_df.iloc[-lookback:]["dt"].values)
+        y_ts = pd.Series(actual_df["dt"].values)
+
+        pred_df = predictor.predict(
+            df=x_df, x_timestamp=x_ts, y_timestamp=y_ts,
+            pred_len=pred_len, T=params["T"], top_p=params["top_p"],
+            sample_count=params.get("sample_count", 3),
+        )
+
+        last_close = float(hist_df.iloc[-1]["close"])
+        pred_df = DataProvider.apply_price_limits(pred_df, last_close)
+
+        # Calculate accuracy metrics
+        import numpy as np
+        actual_closes = actual_df["close"].values.astype(float)
+        pred_closes = pred_df["close"].values.astype(float)
+        min_len = min(len(actual_closes), len(pred_closes))
+        actual_closes = actual_closes[:min_len]
+        pred_closes = pred_closes[:min_len]
+
+        mae = float(np.mean(np.abs(actual_closes - pred_closes)))
+        mape = float(np.mean(np.abs((actual_closes - pred_closes) / (actual_closes + 1e-8))) * 100)
+
+        # Direction accuracy: did the model predict the correct up/down direction?
+        actual_dirs = np.diff(actual_closes) > 0
+        pred_dirs = np.diff(pred_closes) > 0
+        dir_min = min(len(actual_dirs), len(pred_dirs))
+        direction_acc = float(np.mean(actual_dirs[:dir_min] == pred_dirs[:dir_min]) * 100) if dir_min > 0 else 0
+
+        # Overall direction
+        actual_change = (actual_closes[-1] - actual_closes[0]) / actual_closes[0] * 100
+        pred_change = (pred_closes[-1] - last_close) / last_close * 100
+        overall_dir_correct = bool((actual_change > 0) == (pred_change > 0))
+
+        # Prepare response
+        hist_recent = hist_df.iloc[-lookback:].to_dict(orient="records")
+        for row in hist_recent:
+            row["dt"] = str(row["dt"])
+
+        actual_data = actual_df.to_dict(orient="records")
+        for row in actual_data:
+            row["dt"] = str(row["dt"])
+
+        pred_data = pred_df.reset_index(drop=True).to_dict(orient="records")
+        pred_timestamps = [str(t) for t in y_ts]
+
+        db, _ = get_db()
+        stock_name = db.get_stock_name(stock_code)
+
+        return jsonify({
+            'success': True,
+            'stock_code': stock_code,
+            'stock_name': stock_name,
+            'freq': freq,
+            'backtest_start': str(actual_df["dt"].iloc[0]),
+            'backtest_end': str(actual_df["dt"].iloc[-1]),
+            'historical': hist_recent,
+            'predictions': pred_data,
+            'pred_timestamps': pred_timestamps,
+            'actual': actual_data,
+            'metrics': {
+                'mae': round(mae, 4),
+                'mape': round(mape, 2),
+                'direction_accuracy': round(direction_acc, 1),
+                'overall_direction_correct': overall_dir_correct,
+                'actual_change_pct': round(actual_change, 2),
+                'pred_change_pct': round(pred_change, 2),
+            },
+        })
+
+    except Exception as e:
+        return jsonify({'error': f'Backtest failed: {str(e)}'}), 500
+
+
 @app.route('/api/search-stock')
 def search_stock():
     """Search stock by code or name in cached constituents."""
@@ -909,4 +1009,4 @@ if __name__ == '__main__':
     else:
         print("Tip: Will use simulated data for demonstration")
     
-    app.run(debug=True, host='0.0.0.0', port=7070)
+    app.run(debug=False, host='0.0.0.0', port=7070)

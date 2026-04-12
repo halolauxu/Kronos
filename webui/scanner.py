@@ -5,7 +5,7 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from data_provider import DataProvider
+from data_provider import DataProvider, generate_ashare_timestamps
 
 
 FREQ_DEFAULTS = {
@@ -133,19 +133,7 @@ class ScanTask:
             last_close = float(kline_df.iloc[-1]["close"])
             last_closes.append(last_close)
 
-            if self.freq == "daily":
-                y_ts = pd.Series(pd.bdate_range(
-                    start=kline_df["dt"].iloc[-1] + pd.Timedelta(days=1),
-                    periods=pred_len
-                ))
-            else:
-                last_dt = kline_df["dt"].iloc[-1]
-                time_diff = kline_df["dt"].iloc[-1] - kline_df["dt"].iloc[-2] if len(kline_df) > 1 else pd.Timedelta(minutes=5)
-                y_ts = pd.Series(pd.date_range(
-                    start=last_dt + time_diff,
-                    periods=pred_len,
-                    freq=time_diff
-                ))
+            y_ts = generate_ashare_timestamps(kline_df["dt"].iloc[-1], self.freq, pred_len)
 
             df_list.append(x_df)
             x_timestamp_list.append(x_ts)

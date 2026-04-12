@@ -1,4 +1,5 @@
 import time
+import datetime as _dt
 from datetime import datetime, date
 
 import pandas as pd
@@ -34,6 +35,82 @@ MIN_COL_MAP = {
     "成交量": "volume",
     "成交额": "amount",
 }
+
+
+def generate_ashare_timestamps(last_dt, freq, n):
+    """Generate *n* future A-share trading timestamps after *last_dt*.
+
+    A-share 5-minute bar schedule (bar timestamp = period end):
+      Morning : 09:35, 09:40, ..., 11:25, 11:30   (24 bars)
+      Afternoon: 13:05, 13:10, ..., 14:55, 15:00   (24 bars)
+      Total per day: 48 bars.
+
+    For daily frequency, returns business-day timestamps only.
+    Weekends (Sat/Sun) are skipped; public holidays are NOT handled.
+    """
+    if freq == "daily":
+        return pd.Series(
+            pd.bdate_range(
+                start=pd.Timestamp(last_dt) + pd.Timedelta(days=1), periods=n
+            )
+        )
+
+    # --- 5-minute bars ---
+    MORNING_FIRST = _dt.time(9, 35)
+    MORNING_LAST = _dt.time(11, 30)
+    AFTERNOON_FIRST = _dt.time(13, 5)
+    AFTERNOON_LAST = _dt.time(15, 0)
+    INTERVAL = pd.Timedelta(minutes=5)
+
+    timestamps = []
+    current = pd.Timestamp(last_dt) + INTERVAL
+
+    while len(timestamps) < n:
+        t = current.time()
+        wd = current.weekday()
+
+        # Skip weekends
+        if wd >= 5:
+            days_ahead = 7 - wd  # Mon
+            current = current.normalize() + pd.Timedelta(days=days_ahead, hours=9, minutes=35)
+            continue
+
+        if t < MORNING_FIRST:
+            # Before morning session -> jump to 09:35
+            current = current.normalize() + pd.Timedelta(hours=9, minutes=35)
+            continue
+
+        if MORNING_FIRST <= t <= MORNING_LAST:
+            timestamps.append(current)
+            current += INTERVAL
+            # If next tick crosses into lunch break, skip to afternoon
+            if current.time() > MORNING_LAST and current.time() < AFTERNOON_FIRST:
+                current = current.normalize() + pd.Timedelta(hours=13, minutes=5)
+            continue
+
+        if MORNING_LAST < t < AFTERNOON_FIRST:
+            # Lunch break -> jump to 13:05
+            current = current.normalize() + pd.Timedelta(hours=13, minutes=5)
+            continue
+
+        if AFTERNOON_FIRST <= t <= AFTERNOON_LAST:
+            timestamps.append(current)
+            current += INTERVAL
+            # If next tick crosses market close, jump to next trading day
+            if current.time() > AFTERNOON_LAST or current.time() < MORNING_FIRST:
+                next_day = current.normalize() + pd.Timedelta(days=1)
+                while next_day.weekday() >= 5:
+                    next_day += pd.Timedelta(days=1)
+                current = next_day + pd.Timedelta(hours=9, minutes=35)
+            continue
+
+        # After market close -> next trading day
+        next_day = current.normalize() + pd.Timedelta(days=1)
+        while next_day.weekday() >= 5:
+            next_day += pd.Timedelta(days=1)
+        current = next_day + pd.Timedelta(hours=9, minutes=35)
+
+    return pd.Series(timestamps)
 
 
 class DataProvider:
