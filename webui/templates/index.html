@@ -445,6 +445,12 @@
             <p>AI-based financial K-line data prediction analysis platform</p>
         </div>
 
+        <!-- Navigation -->
+        <div style="display:flex; gap:10px; margin-bottom:20px; justify-content:center;">
+            <a href="/" class="btn" style="width:auto; padding:10px 24px; text-decoration:none;">Scan & Ranking</a>
+            <a href="/search" class="btn btn-secondary" style="width:auto; padding:10px 24px; text-decoration:none;">Search Prediction</a>
+        </div>
+
         <div class="main-content">
             <div class="control-panel">
                 <h2>🎯 Control Panel</h2>
@@ -478,6 +484,43 @@
                 <button id="load-model-btn" class="btn btn-secondary">
                     🔄 Load Model
                 </button>
+
+                <hr style="margin: 20px 0; border: 1px solid #e2e8f0;">
+
+                <!-- A-Share Batch Scan Section -->
+                <h2 style="color:#4a5568; margin-bottom:15px; font-size:1.3rem;">A-Share Batch Scan</h2>
+
+                <div class="form-group">
+                    <label for="index-select">Select Index:</label>
+                    <select id="index-select">
+                        <option value="">Loading...</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="freq-select">Frequency:</label>
+                    <select id="freq-select">
+                        <option value="daily">Daily (日线)</option>
+                        <option value="5min">5-Minute (5分钟线)</option>
+                    </select>
+                </div>
+
+                <button id="scan-btn" class="btn btn-success" disabled>
+                    Start Batch Scan
+                </button>
+                <button id="stop-scan-btn" class="btn btn-warning" style="display:none;">
+                    Stop Scan
+                </button>
+
+                <!-- Scan Progress -->
+                <div id="scan-progress" style="display:none; margin-top:15px;">
+                    <div style="background:#e2e8f0; border-radius:8px; height:24px; overflow:hidden;">
+                        <div id="scan-progress-bar" style="background:linear-gradient(135deg,#667eea,#764ba2); height:100%; width:0%; transition:width 0.3s; border-radius:8px; display:flex; align-items:center; justify-content:center; color:white; font-size:12px; font-weight:600;">
+                            0%
+                        </div>
+                    </div>
+                    <p id="scan-progress-text" style="font-size:12px; color:#718096; margin-top:5px;">Preparing...</p>
+                </div>
 
                 <hr style="margin: 20px 0; border: 1px solid #e2e8f0;">
 
@@ -631,6 +674,42 @@
                 </div>
             </div>
         </div>
+
+        <!-- Ranking Table -->
+        <div id="ranking-section" class="chart-container" style="display:none; margin-top:20px;">
+            <h2>Prediction Ranking</h2>
+            <div style="margin-bottom:10px;">
+                <select id="sort-select" style="padding:8px; border:1px solid #e2e8f0; border-radius:6px;">
+                    <option value="pred_change_pct_desc">Predicted Change (High to Low)</option>
+                    <option value="pred_change_pct_asc">Predicted Change (Low to High)</option>
+                    <option value="stock_code_asc">Stock Code (Ascending)</option>
+                </select>
+            </div>
+            <div style="max-height:600px; overflow-y:auto;">
+                <table class="comparison-table" id="ranking-table">
+                    <thead>
+                        <tr>
+                            <th>Rank</th>
+                            <th>Code</th>
+                            <th>Name</th>
+                            <th>Last Close</th>
+                            <th>Predicted Change</th>
+                            <th>Target Price</th>
+                            <th>Action</th>
+                        </tr>
+                    </thead>
+                    <tbody id="ranking-tbody"></tbody>
+                </table>
+            </div>
+        </div>
+
+        <!-- Scan History -->
+        <div id="history-section" class="chart-container" style="margin-top:20px;">
+            <h2>Scan History</h2>
+            <div id="history-list" style="max-height:300px; overflow-y:auto;">
+                <p style="color:#718096;">No scan history yet.</p>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -719,6 +798,7 @@
                     showStatus('success', response.data.message);
                     updateModelStatus();
                     document.getElementById('predict-btn').disabled = false;
+                    document.getElementById('scan-btn').disabled = false;
                     console.log('✅ Model loaded successfully:', response.data.model_info);
                 } else {
                     showStatus('error', response.data.error);
@@ -1233,6 +1313,167 @@
                 loadingDiv.classList.remove('show');
             }
         }
+
+        // ===== A-Share Scan Functions =====
+        let scanPollingInterval = null;
+
+        async function loadIndexList() {
+            try {
+                const response = await axios.get('/api/index-list');
+                const select = document.getElementById('index-select');
+                select.innerHTML = '';
+                response.data.indices.forEach(idx => {
+                    const opt = document.createElement('option');
+                    opt.value = idx.code;
+                    opt.textContent = `${idx.name} (~${idx.count_approx} stocks)`;
+                    select.appendChild(opt);
+                });
+            } catch (e) {
+                console.error('Failed to load index list:', e);
+            }
+        }
+
+        async function startScan() {
+            const indexCode = document.getElementById('index-select').value;
+            const freq = document.getElementById('freq-select').value;
+            const modelKey = document.getElementById('model-select').value;
+            const T = parseFloat(document.getElementById('temperature').value);
+            const topP = parseFloat(document.getElementById('top-p').value);
+            const sampleCount = parseInt(document.getElementById('sample-count').value);
+
+            if (!modelKey || !modelLoaded) {
+                showStatus('error', 'Please load a model first');
+                return;
+            }
+
+            try {
+                const response = await axios.post('/api/scan', {
+                    index_code: indexCode, freq: freq, model_key: modelKey,
+                    T: T, top_p: topP, sample_count: sampleCount,
+                });
+                if (response.data.success) {
+                    document.getElementById('scan-btn').style.display = 'none';
+                    document.getElementById('stop-scan-btn').style.display = 'block';
+                    document.getElementById('scan-progress').style.display = 'block';
+                    document.getElementById('ranking-section').style.display = 'block';
+                    showStatus('success', 'Scan started: ' + response.data.scan_id);
+                    scanPollingInterval = setInterval(pollScanStatus, 2000);
+                }
+            } catch (e) {
+                showStatus('error', e.response?.data?.error || 'Failed to start scan');
+            }
+        }
+
+        async function pollScanStatus() {
+            try {
+                const response = await axios.get('/api/scan/status');
+                const state = response.data;
+                if (state.status === 'idle') return;
+
+                const pct = state.total > 0 ? Math.round((state.completed / state.total) * 100) : 0;
+                const bar = document.getElementById('scan-progress-bar');
+                bar.style.width = pct + '%';
+                bar.textContent = pct + '%';
+                document.getElementById('scan-progress-text').textContent =
+                    `${state.completed}/${state.total} - ${state.current_stock || 'Processing...'}`;
+
+                if (state.results) {
+                    renderRanking(state.results);
+                }
+
+                if (state.status !== 'running') {
+                    clearInterval(scanPollingInterval);
+                    scanPollingInterval = null;
+                    document.getElementById('scan-btn').style.display = 'block';
+                    document.getElementById('stop-scan-btn').style.display = 'none';
+                    showStatus(state.status === 'completed' ? 'success' : 'warning',
+                        `Scan ${state.status}. ${state.completed}/${state.total} stocks processed.` +
+                        (state.errors.length > 0 ? ` ${state.errors.length} errors.` : ''));
+                    loadScanHistory();
+                }
+            } catch (e) {
+                console.error('Poll error:', e);
+            }
+        }
+
+        async function stopScan() {
+            try {
+                await axios.post('/api/scan/stop');
+                showStatus('info', 'Stopping scan...');
+            } catch (e) {
+                showStatus('error', 'Failed to stop scan');
+            }
+        }
+
+        function renderRanking(results) {
+            // Cache results for re-sorting
+            document.getElementById('ranking-tbody').dataset.lastResults = JSON.stringify(results);
+            const sortKey = document.getElementById('sort-select').value;
+            let sorted = [...results];
+            if (sortKey === 'pred_change_pct_desc') sorted.sort((a, b) => b.pred_change_pct - a.pred_change_pct);
+            else if (sortKey === 'pred_change_pct_asc') sorted.sort((a, b) => a.pred_change_pct - b.pred_change_pct);
+            else if (sortKey === 'stock_code_asc') sorted.sort((a, b) => a.stock_code.localeCompare(b.stock_code));
+
+            const tbody = document.getElementById('ranking-tbody');
+            tbody.innerHTML = '';
+            sorted.forEach((r, i) => {
+                const color = r.pred_change_pct >= 0 ? '#EF5350' : '#26A69A';
+                const sign = r.pred_change_pct >= 0 ? '+' : '';
+                const targetPrice = r.last_close * (1 + r.pred_change_pct / 100);
+                tbody.innerHTML += `<tr>
+                    <td>${i + 1}</td>
+                    <td>${r.stock_code}</td>
+                    <td>${r.stock_name}</td>
+                    <td>${r.last_close.toFixed(2)}</td>
+                    <td style="color:${color}; font-weight:600;">${sign}${r.pred_change_pct.toFixed(2)}%</td>
+                    <td>${targetPrice.toFixed(2)}</td>
+                    <td><a href="/stock/${r.stock_code}?freq=${r.freq}" style="color:#667eea;">Detail</a></td>
+                </tr>`;
+            });
+        }
+
+        async function loadScanHistory() {
+            try {
+                const response = await axios.get('/api/scan/history');
+                const div = document.getElementById('history-list');
+                if (response.data.history.length === 0) {
+                    div.innerHTML = '<p style="color:#718096;">No scan history yet.</p>';
+                    return;
+                }
+                div.innerHTML = response.data.history.map(h =>
+                    `<div style="padding:10px; border-bottom:1px solid #e2e8f0; cursor:pointer;" onclick="loadHistoryScan('${h.scan_id}')">
+                        <strong>${h.scan_id}</strong> - ${h.freq} - ${h.model_key} - ${h.total_stocks} stocks
+                        <span style="color:#718096; font-size:12px;"> ${h.started_at}</span>
+                    </div>`
+                ).join('');
+            } catch (e) {
+                console.error('Failed to load history:', e);
+            }
+        }
+
+        async function loadHistoryScan(scanId) {
+            try {
+                const response = await axios.get(`/api/scan/${scanId}/results?page_size=1000`);
+                document.getElementById('ranking-section').style.display = 'block';
+                renderRanking(response.data.results);
+            } catch (e) {
+                showStatus('error', 'Failed to load scan results');
+            }
+        }
+
+        // Wire up scan buttons and init on load
+        document.addEventListener('DOMContentLoaded', function() {
+            loadIndexList();
+            loadScanHistory();
+            document.getElementById('scan-btn').addEventListener('click', startScan);
+            document.getElementById('stop-scan-btn').addEventListener('click', stopScan);
+            document.getElementById('sort-select').addEventListener('change', () => {
+                const tbody = document.getElementById('ranking-tbody');
+                if (tbody.dataset.lastResults) {
+                    renderRanking(JSON.parse(tbody.dataset.lastResults));
+                }
+            });
+        });
     </script>
 </body>
 </html>
