@@ -11,17 +11,17 @@ from data_provider import DataProvider, generate_ashare_timestamps
 FREQ_DEFAULTS = {
     "daily": {
         "lookback": 400,
-        "pred_len": 10,
-        "T": 1.0,
+        "pred_len": 3,       # 3 trading days
+        "T": 0.6,            # Lower T = less random, more conservative predictions
         "top_p": 0.9,
-        "sample_count": 1,
+        "sample_count": 5,   # Average 5 samples for more stable results
     },
     "5min": {
         "lookback": 400,
-        "pred_len": 48,
-        "T": 1.0,
+        "pred_len": 48,      # 1 trading day
+        "T": 0.6,
         "top_p": 0.9,
-        "sample_count": 1,
+        "sample_count": 3,
     },
 }
 
@@ -109,6 +109,10 @@ class ScanTask:
 
                 try:
                     kline_df = self.data_provider.fetch_kline(code, self.freq)
+                    # Rate limit: sleep between stocks to avoid akshare IP ban
+                    import time as _time
+                    _time.sleep(0.3)  # 300ms between each stock
+
                     if kline_df is None or len(kline_df) < lookback:
                         self._state["errors"].append(f"{code}: data insufficient ({len(kline_df) if kline_df is not None else 0})")
                         self._state["completed"] += 1
@@ -195,9 +199,10 @@ class ScanTask:
             self._process_stock(item, pred_dfs[i] if i < len(pred_dfs) else None, last_closes[i])
 
     def _process_stock(self, item, pred_df, last_close):
-        """Save a single stock's prediction result."""
+        """Save a single stock's prediction result, with backtest accuracy."""
         code = item["code"]
         name = item["name"]
+        kline_df = item["kline_df"]
 
         if pred_df is None:
             self._state["errors"].append(f"{code}: prediction failed")
@@ -211,6 +216,14 @@ class ScanTask:
 
         pred_data = pred_df.reset_index(drop=True).to_dict(orient="records")
 
+        # --- Backtest: predict a past period and compare with actual ---
+        backtest_dir_acc = None
+        backtest_overall_correct = None
+        try:
+            backtest_dir_acc, backtest_overall_correct = self._run_backtest(kline_df, code)
+        except Exception:
+            pass  # Backtest failure is non-critical
+
         self.db.save_prediction(
             scan_id=self.scan_id,
             stock_code=code,
@@ -222,5 +235,51 @@ class ScanTask:
             pred_change_pct=round(pred_change_pct, 4),
             pred_data=json.dumps(pred_data),
             params=json.dumps(self.params),
+            backtest_dir_acc=backtest_dir_acc,
+            backtest_overall_correct=backtest_overall_correct,
         )
         self._state["completed"] += 1
+
+    def _run_backtest(self, kline_df, code):
+        """Run backtest over the most recent 10 trading days to assess model accuracy."""
+        lookback = self.params["lookback"]
+        bt_pred_len = 5  # Backtest 5 trading days (1 week)
+
+        if len(kline_df) < lookback + bt_pred_len:
+            return None, None
+
+        split_idx = len(kline_df) - bt_pred_len
+        hist_df = kline_df.iloc[:split_idx]
+        actual_df = kline_df.iloc[split_idx:]
+
+        x_df = hist_df.iloc[-lookback:][["open", "high", "low", "close", "volume", "amount"]]
+        x_ts = pd.Series(hist_df.iloc[-lookback:]["dt"].values)
+        y_ts = pd.Series(actual_df["dt"].values)
+
+        bt_pred_df = self.predictor.predict(
+            df=x_df, x_timestamp=x_ts, y_timestamp=y_ts,
+            pred_len=bt_pred_len, T=self.params["T"], top_p=self.params["top_p"],
+            sample_count=1,  # Use 1 sample for speed in batch backtest
+        )
+
+        bt_last_close = float(hist_df.iloc[-1]["close"])
+        bt_pred_df = DataProvider.apply_price_limits(bt_pred_df, bt_last_close)
+
+        actual_closes = actual_df["close"].values.astype(float)
+        pred_closes = bt_pred_df["close"].values.astype(float)
+        min_len = min(len(actual_closes), len(pred_closes))
+
+        if min_len < 2:
+            return None, None
+
+        # Per-bar direction accuracy: each bar up/down vs previous bar
+        actual_dirs = np.diff(actual_closes[:min_len]) > 0
+        pred_dirs = np.diff(pred_closes[:min_len]) > 0
+        dir_acc = float(np.mean(actual_dirs == pred_dirs) * 100)
+
+        # Overall direction: did the model get the 10-day trend right?
+        actual_change = actual_closes[min_len - 1] - actual_closes[0]
+        pred_change = pred_closes[min_len - 1] - bt_last_close
+        overall_correct = 1 if (actual_change > 0) == (pred_change > 0) else 0
+
+        return round(dir_acc, 1), overall_correct

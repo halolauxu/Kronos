@@ -149,53 +149,105 @@ class DataProvider:
         self.db.upsert_constituents(index_code, stocks)
         return self.db.get_constituents(index_code)
 
-    def fetch_kline(self, stock_code, freq, max_retries=5):
+    def fetch_kline(self, stock_code, freq, max_retries=5, cache_minutes=30):
         """Fetch kline data with incremental update. Returns DataFrame from DB.
 
-        Strategy: try to fetch from akshare, but always fall back to DB cache.
-        This means the first scan may have gaps, but subsequent scans fill them in.
+        If data was updated within cache_minutes, skip the akshare call entirely
+        and use cached data. This makes repeated scans much faster.
         """
         last_dt = self.db.get_last_kline_dt(stock_code, freq)
 
-        raw_df = self._fetch_kline_from_akshare(stock_code, freq, max_retries)
-        if raw_df is not None and not raw_df.empty:
-            cleaned = self._clean_kline(raw_df, freq)
-            if last_dt:
-                last_dt_parsed = pd.to_datetime(last_dt)
-                cleaned = cleaned[cleaned["dt"] > last_dt_parsed]
-            if not cleaned.empty:
-                self.db.upsert_kline(stock_code, freq, cleaned)
+        # Check if cache is fresh enough to skip network call
+        need_fetch = True
+        if last_dt:
+            last_dt_parsed = pd.to_datetime(last_dt)
+            age = datetime.now() - last_dt_parsed.to_pydatetime().replace(tzinfo=None)
+            if age.total_seconds() < cache_minutes * 60:
+                need_fetch = False  # Data is fresh, skip akshare
 
-        # Always return from DB (may have data from previous runs even if fetch failed)
+            # For daily data, if last_dt is today, definitely skip
+            if freq == "daily" and last_dt_parsed.date() >= date.today():
+                need_fetch = False
+
+        if need_fetch:
+            raw_df = self._fetch_kline_from_akshare(stock_code, freq, max_retries)
+            if raw_df is not None and not raw_df.empty:
+                cleaned = self._clean_kline(raw_df, freq)
+                if last_dt:
+                    cleaned = cleaned[cleaned["dt"] > last_dt_parsed]
+                if not cleaned.empty:
+                    self.db.upsert_kline(stock_code, freq, cleaned)
+
+        # Always return from DB
         return self.db.get_kline(stock_code, freq, limit=600)
 
-    def _fetch_kline_from_akshare(self, stock_code, freq, max_retries=5):
+    @staticmethod
+    def _stock_code_to_163(code):
+        """Convert 6-digit code to 163-style prefix: sz000001 / sh600519."""
+        code = str(code).zfill(6)
+        if code.startswith(('6', '9')):
+            return 'sh' + code
+        return 'sz' + code
+
+    def _fetch_kline_from_akshare(self, stock_code, freq, max_retries=3):
         if ak is None:
             raise ImportError("akshare is not installed. Run: pip install akshare")
 
-        last_error = None
+        # Strategy: try multiple data sources in order of reliability
+        # Source 1 (primary for daily): 163 source — stable, no rate limit
+        # Source 2 (fallback): 东财 source — has rate limits
+        # Source 3 (5min only): 东财 min source
+
         for attempt in range(1, max_retries + 1):
             try:
                 if freq == "daily":
-                    df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="")
+                    # Try 163 source first (much more stable)
+                    try:
+                        symbol_163 = self._stock_code_to_163(stock_code)
+                        df = ak.stock_zh_a_daily(symbol=symbol_163)
+                        if df is not None and not df.empty:
+                            return df
+                    except Exception:
+                        pass
+                    # Fallback to 东财
+                    try:
+                        df = ak.stock_zh_a_hist(symbol=stock_code, period="daily", adjust="")
+                        if df is not None and not df.empty:
+                            return df
+                    except Exception:
+                        pass
                 else:
-                    df = ak.stock_zh_a_hist_min_em(symbol=stock_code, period="5", adjust="")
-                if df is not None and not df.empty:
-                    return df
-            except Exception as e:
-                last_error = e
-            # Exponential backoff: 0.5s, 1s, 2s, 4s, 8s
-            time.sleep(min(0.5 * (2 ** (attempt - 1)), 8))
+                    # 5min: only 东财 has this
+                    try:
+                        df = ak.stock_zh_a_hist_min_em(symbol=stock_code, period="5", adjust="")
+                        if df is not None and not df.empty:
+                            return df
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+            time.sleep(min(0.5 * (2 ** (attempt - 1)), 4))
         return None
 
     def _clean_kline(self, df, freq):
-        """Clean and normalize kline data from akshare."""
-        col_map = DAILY_COL_MAP if freq == "daily" else MIN_COL_MAP
-        rename_map = {}
-        for cn, en in col_map.items():
-            if cn in df.columns:
-                rename_map[cn] = en
-        df = df.rename(columns=rename_map)
+        """Clean and normalize kline data from akshare.
+        Handles multiple data source formats:
+        - 东财 source: Chinese column names (日期, 开盘, etc.)
+        - 163 source: English column names (date, open, etc.) with 'date' column
+        """
+        df = df.copy()
+
+        # If columns are already English (163 source), just rename date->dt
+        if "date" in df.columns and "open" in df.columns:
+            df = df.rename(columns={"date": "dt"})
+        else:
+            # Chinese column names (东财 source)
+            col_map = DAILY_COL_MAP if freq == "daily" else MIN_COL_MAP
+            rename_map = {}
+            for cn, en in col_map.items():
+                if cn in df.columns:
+                    rename_map[cn] = en
+            df = df.rename(columns=rename_map)
 
         df["dt"] = pd.to_datetime(df["dt"])
         df = df.sort_values("dt").reset_index(drop=True)

@@ -1,0 +1,9 @@
+{
+    "start_time": "2026-04-13T03-53-40",
+    "save_directory": "./outputs/models/finetune_tokenizer_demo",
+    "world_size": 1,
+    "device": "mps",
+    "final_result": {
+        "best_val_loss": 0.007529015594627708
+    }
+}

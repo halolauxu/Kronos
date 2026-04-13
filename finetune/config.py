@@ -11,15 +11,15 @@ class Config:
         # =================================================================
         # TODO: Update this path to your Qlib data directory.
         self.qlib_data_path = "~/.qlib/qlib_data/cn_data"
-        self.instrument = 'csi300'
+        self.instrument = 'all'
 
         # Overall time range for data loading from Qlib.
-        self.dataset_begin_time = "2011-01-01"
-        self.dataset_end_time = '2025-06-05'
+        self.dataset_begin_time = "2015-01-01"
+        self.dataset_end_time = '2026-04-10'
 
         # Sliding window parameters for creating samples.
         self.lookback_window = 90  # Number of past time steps for input.
-        self.predict_window = 10  # Number of future time steps for prediction.
+        self.predict_window = 5   # Predict 5 trading days (match Web UI setting).
         self.max_context = 512  # Maximum context length for the model.
 
         # Features to be used from the raw data.
@@ -32,10 +32,10 @@ class Config:
         # =================================================================
         # Note: The validation/test set starts earlier than the training/validation set ends
         # to account for the `lookback_window`.
-        self.train_time_range = ["2011-01-01", "2022-12-31"]
-        self.val_time_range = ["2022-09-01", "2024-06-30"]
-        self.test_time_range = ["2024-04-01", "2025-06-05"]
-        self.backtest_time_range = ["2024-07-01", "2025-06-05"]
+        self.train_time_range = ["2015-01-01", "2024-06-30"]
+        self.val_time_range = ["2024-04-01", "2025-06-30"]
+        self.test_time_range = ["2025-01-01", "2026-04-10"]
+        self.backtest_time_range = ["2025-07-01", "2026-04-10"]
 
         # TODO: Directory to save the processed, pickled datasets.
         self.dataset_path = "./data/processed_datasets"
@@ -56,7 +56,7 @@ class Config:
 
         # Learning rates for different model components.
         self.tokenizer_learning_rate = 2e-4
-        self.predictor_learning_rate = 4e-5
+        self.predictor_learning_rate = 5e-6  # Reduced from 4e-5 to prevent overfitting
 
         # Gradient accumulation to simulate a larger batch size.
         self.accumulation_steps = 1
@@ -116,7 +116,7 @@ class Config:
         self.inference_top_k = 0
         self.inference_sample_count = 5
         self.backtest_batch_size = 1000
-        self.backtest_benchmark = self._set_benchmark(self.instrument)
+        self.backtest_benchmark = self._set_benchmark(self.instrument) if self.instrument != 'all' else "SH000300"
 
     def _set_benchmark(self, instrument):
         dt_benchmark = {

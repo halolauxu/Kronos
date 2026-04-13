@@ -73,6 +73,14 @@ AVAILABLE_MODELS = {
         'context_length': 512,
         'params': '102.3M',
         'description': 'Base model, provides better prediction quality'
+    },
+    'kronos-base-ashare': {
+        'name': 'Kronos-base-A股微调版',
+        'model_id': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'finetune/outputs/models/finetune_predictor_demo/checkpoints/best_model'),
+        'tokenizer_id': os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'finetune/outputs/models/finetune_tokenizer_demo/checkpoints/best_model'),
+        'context_length': 512,
+        'params': '102.3M',
+        'description': 'A股沪深300日线微调版 (2015-2026)'
     }
 }
 
