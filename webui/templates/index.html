@@ -227,11 +227,13 @@
                             <th style="text-align:right">最新价</th>
                             <th style="text-align:right">预测涨跌幅</th>
                             <th style="text-align:right">预测目标价</th>
+                            <th style="text-align:center">整体方向</th>
+                            <th style="text-align:center">逐日准确率</th>
                             <th style="text-align:center">操作</th>
                         </tr>
                     </thead>
                     <tbody id="ranking-tbody">
-                        <tr><td colspan="7" style="text-align:center; padding:40px; color:#9ca3af;">请先加载模型，然后开始扫描</td></tr>
+                        <tr><td colspan="9" style="text-align:center; padding:40px; color:#9ca3af;">请先加载模型，然后开始扫描</td></tr>
                     </tbody>
                 </table>
             </div>
@@ -400,7 +402,12 @@
                 document.getElementById('scan-progress-bar').style.width = pct + '%';
                 document.getElementById('scan-progress-bar').textContent = pct + '%';
                 document.getElementById('scan-progress-text').textContent = `${s.completed}/${s.total} | 正在处理：${s.current_stock || '...'}`;
-                document.getElementById('ranking-count').textContent = s.completed + ' 只股票';
+
+                const resultCount = s.results ? s.results.length : 0;
+                const skipCount = s.completed - resultCount;
+                let countText = resultCount + ' 只有预测';
+                if (skipCount > 0) countText += `，${skipCount} 只数据不足跳过`;
+                document.getElementById('ranking-count').textContent = countText;
 
                 if (s.results && s.results.length > 0) {
                     cachedResults = s.results;
@@ -409,9 +416,8 @@
 
                 if (s.status !== 'running') {
                     stopPolling();
-                    const errMsg = s.errors && s.errors.length > 0 ? `（${s.errors.length} 个错误）` : '';
                     const statusText = s.status === 'completed' ? '扫描完成' : s.status === 'stopped' ? '扫描已停止' : '扫描结束';
-                    showToast(`${statusText}，已处理 ${s.completed}/${s.total} 只${errMsg}`, s.status === 'completed' ? 'success' : 'info');
+                    showToast(`${statusText}：${resultCount} 只预测成功，${skipCount} 只跳过（共 ${s.completed}/${s.total}）`, s.status === 'completed' ? 'success' : 'info');
                     loadScanHistory();
                 }
             } catch(e) {}
@@ -459,7 +465,7 @@
 
             const tbody = document.getElementById('ranking-tbody');
             if (sorted.length === 0) {
-                tbody.innerHTML = '<tr><td colspan="7" style="text-align:center; padding:40px; color:#9ca3af;">暂无结果</td></tr>';
+                tbody.innerHTML = '<tr><td colspan="9" style="text-align:center; padding:40px; color:#9ca3af;">暂无结果</td></tr>';
                 return;
             }
             tbody.innerHTML = sorted.map((r, i) => {
@@ -467,6 +473,20 @@
                 const sign = r.pred_change_pct >= 0 ? '+' : '';
                 const target = r.last_close * (1 + r.pred_change_pct / 100);
                 const freq = r.freq || 'daily';
+
+                // Backtest: two columns — overall direction + per-bar accuracy
+                let overallHtml = '<span style="color:#9ca3af;">-</span>';
+                let accHtml = '<span style="color:#9ca3af;">-</span>';
+                if (r.backtest_overall_correct != null) {
+                    overallHtml = r.backtest_overall_correct
+                        ? '<span style="color:#22c55e;font-weight:700;">正确</span>'
+                        : '<span style="color:#ef4444;font-weight:700;">错误</span>';
+                }
+                if (r.backtest_dir_acc != null) {
+                    const accColor = r.backtest_dir_acc >= 60 ? '#22c55e' : r.backtest_dir_acc >= 45 ? '#f59e0b' : '#ef4444';
+                    accHtml = `<span style="color:${accColor};font-weight:700;">${r.backtest_dir_acc.toFixed(0)}%</span>`;
+                }
+
                 return `<tr>
                     <td>${i+1}</td>
                     <td><strong>${r.stock_code}</strong></td>
@@ -474,6 +494,8 @@
                     <td style="text-align:right">${r.last_close.toFixed(2)}</td>
                     <td style="text-align:right" class="${cls}">${sign}${r.pred_change_pct.toFixed(2)}%</td>
                     <td style="text-align:right">${target.toFixed(2)}</td>
+                    <td style="text-align:center">${overallHtml}</td>
+                    <td style="text-align:center">${accHtml}</td>
                     <td style="text-align:center"><a href="/stock/${r.stock_code}?freq=${freq}" target="_blank" class="detail-link">查看详情</a></td>
                 </tr>`;
             }).join('');
