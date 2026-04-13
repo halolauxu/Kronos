@@ -58,7 +58,9 @@ class Database:
                     pred_close REAL,
                     pred_change_pct REAL,
                     pred_data JSON,
-                    params JSON
+                    params JSON,
+                    backtest_dir_acc REAL DEFAULT NULL,
+                    backtest_overall_correct INTEGER DEFAULT NULL
                 );
                 CREATE TABLE IF NOT EXISTS scan_jobs (
                     scan_id TEXT PRIMARY KEY,
@@ -193,7 +195,8 @@ class Database:
     # --- Predictions ---
 
     def save_prediction(self, scan_id, stock_code, stock_name, freq, model_key,
-                        last_close, pred_close, pred_change_pct, pred_data, params):
+                        last_close, pred_close, pred_change_pct, pred_data, params,
+                        backtest_dir_acc=None, backtest_overall_correct=None):
         now = datetime.now().isoformat()
         with self._lock:
             conn = self._get_conn()
@@ -201,10 +204,12 @@ class Database:
                 conn.execute(
                     """INSERT INTO prediction_results
                        (scan_id, stock_code, stock_name, freq, model_key, predicted_at,
-                        last_close, pred_close, pred_change_pct, pred_data, params)
-                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                        last_close, pred_close, pred_change_pct, pred_data, params,
+                        backtest_dir_acc, backtest_overall_correct)
+                       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                     (scan_id, stock_code, stock_name, freq, model_key, now,
-                     last_close, pred_close, pred_change_pct, pred_data, params),
+                     last_close, pred_close, pred_change_pct, pred_data, params,
+                     backtest_dir_acc, backtest_overall_correct),
                 )
                 conn.commit()
             finally:
@@ -344,7 +349,8 @@ class Database:
             offset = (page - 1) * page_size
             rows = conn.execute(
                 """SELECT scan_id, stock_code, stock_name, freq, model_key,
-                          predicted_at, last_close, pred_close, pred_change_pct
+                          predicted_at, last_close, pred_close, pred_change_pct,
+                          backtest_dir_acc, backtest_overall_correct
                    FROM prediction_results WHERE scan_id = ?
                    ORDER BY pred_change_pct DESC LIMIT ? OFFSET ?""",
                 (scan_id, page_size, offset),
